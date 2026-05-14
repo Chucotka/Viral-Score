@@ -1996,7 +1996,7 @@
             }
         };
 
-        const MODEL_CANDIDATES = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17'];
+        const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
         const ANALYSIS_SCHEMA = {
             type: 'object',
@@ -2617,7 +2617,7 @@
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
-            if (state.backendUrl) {
+            if (state.backendUrl && !shouldUseDirectBackendUpload()) {
                 state.videoBlobCacheKey = cacheKey;
                 state.blobUploadPromise = uploadVideoToBlob(file)
                     .then(result => {
@@ -2736,6 +2736,25 @@
 
         function canAnalyze() {
             return Boolean(state.backendUrl);
+        }
+
+        function isLocalBackendUrl() {
+            if (!state.backendUrl) return false;
+            try {
+                const url = new URL(state.backendUrl, window.location.href);
+                const host = url.hostname.toLowerCase();
+                return host === 'localhost'
+                    || host === '127.0.0.1'
+                    || host === '0.0.0.0'
+                    || host === '::1'
+                    || host.endsWith('.local');
+            } catch {
+                return false;
+            }
+        }
+
+        function shouldUseDirectBackendUpload() {
+            return isLocalBackendUrl() && state.backendHealth?.blobConfigured !== true;
         }
 
         function renderLaunchChecklist() {
@@ -3563,20 +3582,24 @@
             formData.append('freeLimit', String(state.freeLimit));
             formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
-                if (state.blobUploadPromise) {
-                    try {
-                        await state.blobUploadPromise;
-                    } catch {
-                        // Prefetch may fail (e.g. offline); fall through to explicit upload.
+                if (shouldUseDirectBackendUpload()) {
+                    formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
+                } else {
+                    if (state.blobUploadPromise) {
+                        try {
+                            await state.blobUploadPromise;
+                        } catch {
+                            // Prefetch may fail (e.g. offline); fall through to explicit upload.
+                        }
                     }
+                    let videoBlobUrl = state.uploadedVideoBlobUrl;
+                    if (!videoBlobUrl) {
+                        const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
+                        videoBlobUrl = uploaded.url;
+                        state.uploadedVideoBlobUrl = videoBlobUrl;
+                    }
+                    formData.append('videoBlobUrl', videoBlobUrl);
                 }
-                let videoBlobUrl = state.uploadedVideoBlobUrl;
-                if (!videoBlobUrl) {
-                    const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                    videoBlobUrl = uploaded.url;
-                    state.uploadedVideoBlobUrl = videoBlobUrl;
-                }
-                formData.append('videoBlobUrl', videoBlobUrl);
             }
             if (state.currentSourceType === 'video-url') {
                 const urlValue = normalizePasteableLink(postUrlInput.value.trim()) || postUrlInput.value.trim();

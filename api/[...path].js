@@ -1,14 +1,12 @@
 import { Readable } from 'node:stream';
 import { handleUpload } from '@vercel/blob/client';
 
-/** Vercel Pro/Enterprise: up to 800s (Hobby stays capped at 300s by plan). */
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
-// Fastest models first — fewer round-trips when the first model succeeds
-const MODEL_CANDIDATES = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17'];
+const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {

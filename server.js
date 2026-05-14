@@ -13,7 +13,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const INDEX_PATH = path.join(__dirname, 'index.html');
 const CONTRACT_PATH = path.join(__dirname, 'BACKEND_CONTRACT.md');
 const STATE_PATH = path.join(__dirname, 'server-state.json');
-const MODEL_CANDIDATES = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17'];
+const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 let serverStateCache = null;
 const ANALYSIS_SCHEMA = {
   type: 'object',
@@ -799,7 +799,13 @@ const server = http.createServer(async (req, res) => {
       return serveFile(res, CONTRACT_PATH, 'text/markdown; charset=utf-8');
     }
     if (req.method === 'GET' && url.pathname === '/health') {
-      return sendJson(res, 200, { ok: true, geminiConfigured: Boolean(GEMINI_API_KEY), botConfigured: Boolean(BOT_TOKEN) });
+      return sendJson(res, 200, {
+        ok: true,
+        geminiConfigured: Boolean(GEMINI_API_KEY),
+        botConfigured: Boolean(BOT_TOKEN),
+        blobConfigured: false,
+        directUploadFallback: true
+      });
     }
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const clientId = url.searchParams.get('clientId');
