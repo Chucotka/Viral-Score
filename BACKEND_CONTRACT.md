@@ -1,0 +1,126 @@
+# Viral Score Backend Contract
+
+The web app does not ask users for a Gemini API key. The key must live on your backend.
+
+## Endpoint
+
+Default client endpoint:
+
+```txt
+POST /api/analyze
+```
+
+The URL can be overridden in the app settings for local testing.
+
+Health check:
+
+```txt
+GET /health
+```
+Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false }`.
+
+Client status:
+
+```txt
+GET /api/status?clientId=...
+```
+
+History sync:
+
+```txt
+GET /api/history?clientId=...
+```
+
+Unlock access:
+
+```txt
+POST /api/unlock
+```
+
+Payment payload:
+
+```txt
+GET /api/payment-payload?clientId=...&method=stars
+```
+
+Stars invoice link:
+
+```txt
+POST /api/stars-invoice-link
+```
+
+Telegram webhook:
+
+```txt
+POST /api/telegram-webhook
+```
+
+## Request
+
+The frontend sends `multipart/form-data`.
+
+Fields:
+
+- `clientId`: stable per-user or per-device identifier
+- `analysisId`: stable id for the current analysis run
+- `platform`: `Instagram`, `TikTok`, `YouTube`, `X`, or `Telegram`
+- `mode`: `quick`, `pro`, or `ad`
+- `sourceType`: `video-file`, `video-url`, or `text`
+- `language`: `en` or `ru`
+- `context`: optional extra user context
+- `prompt`: the assembled analysis prompt
+- `freeLimit`: current free quota value from the client
+- `accessUnlocked`: `1` or `0`
+- `video`: file, only for `video-file`
+- `url`: post/video URL, only for `video-url`
+- `text`: caption/transcript/script, only for `text`
+- `clientId`: required for `POST /api/unlock`
+- `clientId` and optional `method`: used by `GET /api/payment-payload`
+- `clientId`, `title`, `description`, `stars`: used by `POST /api/stars-invoice-link`
+- `message.successful_payment.invoice_payload`: used by `POST /api/telegram-webhook`
+
+## Response
+
+Return JSON matching this shape:
+
+```json
+{
+  "viral_score": 78,
+  "hook_strength": 82,
+  "retention_score": 74,
+  "clarity_score": 80,
+  "shareability_score": 76,
+  "cta_score": 70,
+  "platform_fit_score": 84,
+  "first_three_seconds_score": 79,
+  "strengths": ["Clear premise"],
+  "risks": ["CTA appears too late"],
+  "suggestions": ["Move the payoff into the first 3 seconds"],
+  "next_actions": ["Test a shorter hook"],
+  "summary": "Strong concept with room to tighten the opening.",
+  "hook_insight": "The first line is specific and easy to understand.",
+  "retention_insight": "The middle section needs more pattern breaks.",
+  "shareability_insight": "The topic has clear save/share potential.",
+  "platform_fit_insight": "Fits short-form discovery well.",
+  "improved_hook": "Stop posting videos before checking this.",
+  "improved_caption": "Run your next post through this before publishing.",
+  "improved_cta": "Upload your draft and get a viral score."
+}
+```
+
+The frontend also accepts `{ "result": { ... } }` or `{ "analysis": { ... } }`.
+The backend may also return `usageCount`, `accessUnlocked`, and `freeLimit`.
+The history endpoint returns `{ "history": [...] }`.
+The unlock endpoint returns `{ "accessUnlocked": true, ... }`.
+The Telegram webhook returns `{ "ok": true, "handled": true, ... }` when a payment is recognized.
+The payload endpoint returns `{ "payload": "clientId:..." }` and the method.
+The payload format is `clientId:<id>;method:<method>`.
+The Stars invoice endpoint returns `{ "clientId": "...", "method": "stars", "invoiceLink": "...", "payload": "...", "stars": 10 }`.
+
+## Notes
+
+- Store `GEMINI_API_KEY` only on the server.
+- Store `BOT_TOKEN` only on the server before using the Stars invoice generator.
+- Validate Telegram payments and free limits on the server for production.
+- Do not trust localStorage for paid access in production.
+- Allow CORS for the frontend origin, especially if the app is opened from `file://` during local testing.
