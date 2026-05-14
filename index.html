@@ -212,6 +212,24 @@
             margin-bottom: 16px;
         }
 
+        .intro-visual {
+            width: 100%;
+            aspect-ratio: 16 / 10;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 14px;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.04);
+        }
+
+        .intro-visual img {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: cover;
+            object-position: center;
+        }
+
         .status-row {
             display: flex;
             align-items: center;
@@ -1162,6 +1180,9 @@
             </div>
 
             <div class="intro-card fade-in-up" style="animation-delay: 20ms;">
+                <div class="intro-visual">
+                    <img src="assets/viral-score-hero.png" alt="" loading="eager">
+                </div>
                 <div class="intro-title" data-i18n="introTitle">Upload, score, improve</div>
                 <div class="intro-text" data-i18n="introText">Paste a link, upload a short video, or drop in a caption. The app scores virality, explains why, and rewrites the hook, caption, and CTA.</div>
                 <div class="step-row">
