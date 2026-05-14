@@ -2369,7 +2369,7 @@
             }
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
-            const { upload } = await import('https://esm.sh/@vercel/blob/client');
+            const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
             try {
                 const result = await upload(file.name, file, {
                     access: 'public',
