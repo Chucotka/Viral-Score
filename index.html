@@ -1807,6 +1807,7 @@
                 missingFileUri: 'Missing uploaded file URI.',
                 invalidUrl: 'Please paste a valid URL.',
                 invalidText: 'Please paste the caption, transcript, or script.',
+                blobNotConfigured: 'Video uploads are not configured yet. Create a Vercel Blob store and redeploy.',
                 blobUploadFailed: 'Could not upload the video to storage. Try a smaller file or a YouTube link.',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
@@ -1820,6 +1821,7 @@
                 paywallBoth: 'Free quota ended. Unlock with Stars, pay by card, or support via Tribute.',
                 quotaLabel: count => `Free analyses used: ${count}`,
                 quotaLabelLimit: (count, limit) => `${count}/${limit} free analyses used`,
+                urlContextWarning: host => `⚠️ ${host} requires login — analysis based on your notes and URL metadata only.`,
                 shareText: score => `⚡ My post scored ${score}/100 on Viral Score!\n\n🔥 Try it yourself →`
             },
             ru: {
@@ -1975,6 +1977,7 @@
                 missingFileUri: 'Не найден URI загруженного файла.',
                 invalidUrl: 'Вставь корректную ссылку.',
                 invalidText: 'Вставь caption, транскрипт или сценарий.',
+                blobNotConfigured: 'Загрузка видео ещё не настроена. Создай Vercel Blob store и сделай redeploy.',
                 blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
@@ -1988,11 +1991,12 @@
                 paywallBoth: 'Бесплатный лимит закончился. Разблокируй Stars, оплати картой или поддержи через Tribute.',
                 quotaLabel: count => `Использовано бесплатных анализов: ${count}`,
                 quotaLabelLimit: (count, limit) => `Использовано ${count}/${limit} бесплатных анализов`,
+                urlContextWarning: host => `⚠️ ${host} требует авторизации — анализ по твоим заметкам и метаданным URL.`,
                 shareText: score => `⚡ Мой пост набрал ${score}/100 в Viral Score!\n\n🔥 Попробуй сам →`
             }
         };
 
-        const MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+        const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
         const ANALYSIS_SCHEMA = {
             type: 'object',
@@ -2336,17 +2340,52 @@
             return normalizeUrl(value) || extractFirstUrl(value);
         }
 
+        function isDirectVideoUrl(value) {
+            try {
+                const path = new URL(value).pathname.toLowerCase();
+                return /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(path);
+            } catch {
+                return false;
+            }
+        }
+
+        const CLOSED_PLATFORMS = ['tiktok.com', 'instagram.com', 'vk.com', 'vkvideo.ru'];
+
+        function getUrlPlatformWarning(value) {
+            try {
+                const host = new URL(value).hostname.replace(/^www\./, '');
+                const isClosed = CLOSED_PLATFORMS.some(p => host.includes(p));
+                if (isClosed) return t('urlContextWarning', host);
+                return null;
+            } catch {
+                return null;
+            }
+        }
+
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            const { upload } = await import('https://esm.sh/@vercel/blob/client');
-            const result = await upload(file.name, file, {
-                access: 'public',
-                handleUploadUrl: '/api/blob/upload'
-            });
-            if (!result?.url) {
-                throw new Error(t('blobUploadFailed'));
+            if (state.backendHealth && state.backendHealth.blobConfigured === false) {
+                throw new Error(t('blobNotConfigured'));
             }
-            return result;
+            const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
+            if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
+            const { upload } = await import('https://esm.sh/@vercel/blob/client');
+            try {
+                const result = await upload(file.name, file, {
+                    access: 'public',
+                    handleUploadUrl
+                });
+                if (!result?.url) {
+                    throw new Error(t('blobUploadFailed'));
+                }
+                return result;
+            } catch (error) {
+                const message = String(error?.message || '');
+                if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
+                    throw new Error(t('blobNotConfigured'));
+                }
+                throw new Error(message || t('blobUploadFailed'));
+            }
         }
 
         function getSourceLabel() {
@@ -2618,8 +2657,14 @@
                         return normalized;
                     }
                 })();
-                linkPreview.classList.add('ready');
-                linkPreview.textContent = `${t('linkDetected')}: ${host} · ${t('linkReady')}`;
+                const platformWarning = getUrlPlatformWarning(normalized);
+                if (platformWarning) {
+                    linkPreview.classList.add('warn');
+                    linkPreview.textContent = platformWarning;
+                } else {
+                    linkPreview.classList.add('ready');
+                    linkPreview.textContent = `${t('linkDetected')}: ${host} · ${t('linkReady')}`;
+                }
             } else {
                 linkPreview.classList.add('warn');
                 linkPreview.textContent = t('linkNotFound');
@@ -3396,21 +3441,14 @@
             if (state.currentSourceType === 'video-url') {
                 const rawValue = postUrlInput.value.trim();
                 const rawUrl = normalizePasteableLink(rawValue);
-                if (rawUrl && isYouTubeUrl(rawUrl)) {
-                    return {
-                        contents: [{
-                            parts: [
-                                { file_data: { file_uri: rawUrl } },
-                                { text: prompt }
-                            ]
-                        }]
-                    };
-                }
                 if (rawUrl) {
+                    const videoLinkHint = isYouTubeUrl(rawUrl)
+                        ? 'This is a YouTube link. Use URL context, public metadata, title/description/transcript if available, and the user context. Do not attempt to download the whole video.'
+                        : 'Use URL context, public page metadata, visible text, and the user context. Do not attempt to download the whole video.';
                     return {
                         contents: [{
                             parts: [
-                                { text: `${prompt}\n\nPublic URL:\n${rawUrl}` }
+                                { text: `${prompt}\n\n${videoLinkHint}\n\nPublic URL:\n${rawUrl}` }
                             ]
                         }],
                         tools: [{ url_context: {} }]
@@ -3506,11 +3544,14 @@
         async function getApiError(response, fallback) {
             try {
                 const data = await response.clone().json();
-                return data?.error?.message || fallback;
+                // Handle both {error: "string"} and {error: {message: "string"}} formats
+                if (typeof data?.error === 'string') return data.error;
+                if (typeof data?.error?.message === 'string') return data.error.message;
+                return fallback;
             } catch {
                 try {
                     const text = await response.clone().text();
-                    return text || fallback;
+                    return text.slice(0, 500) || fallback;
                 } catch {
                     return fallback;
                 }

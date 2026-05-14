@@ -1,6 +1,8 @@
 import { Readable } from 'node:stream';
 import { handleUpload } from '@vercel/blob/client';
 
+const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -20,6 +22,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (!BLOB_READ_WRITE_TOKEN) {
+      return sendJson(res, 500, { error: 'BLOB_READ_WRITE_TOKEN is not configured on the server.' });
+    }
     const url = new URL(req.url || '/api/blob/upload', 'http://localhost');
     const request = new Request(url.toString(), {
       method: req.method,

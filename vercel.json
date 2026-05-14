@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 300
+    }
+  },
   "rewrites": [
     { "source": "/health", "destination": "/api/health" },
     { "source": "/privacy", "destination": "/privacy.html" }

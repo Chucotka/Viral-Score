@@ -1,8 +1,10 @@
 import { Readable } from 'node:stream';
+import { handleUpload } from '@vercel/blob/client';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
-const MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -192,6 +194,30 @@ function isYouTubeUrl(value) {
   }
 }
 
+function isDirectVideoUrl(value) {
+  try {
+    const url = new URL(value);
+    const path = url.pathname.toLowerCase();
+    return /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+function getUrlPlatform(value) {
+  try {
+    const host = new URL(value).hostname.replace(/^www\./, '');
+    if (host.includes('youtube.com') || host.includes('youtu.be')) return 'youtube';
+    if (host.includes('tiktok.com')) return 'tiktok';
+    if (host.includes('instagram.com')) return 'instagram';
+    if (host.includes('vk.com') || host.includes('vkvideo.ru')) return 'vk';
+    if (host.includes('t.me') || host.includes('telegram.org')) return 'telegram';
+    return 'other';
+  } catch {
+    return 'other';
+  }
+}
+
 function normalizeUrl(value) {
   try {
     return new URL(value).toString();
@@ -240,11 +266,14 @@ function extractClientIdFromPayload(payload) {
 async function getApiError(response, fallback) {
   try {
     const data = await response.clone().json();
-    return data?.error?.message || fallback;
+    // Handle both {error: "string"} and {error: {message: "string"}} formats
+    if (typeof data?.error === 'string') return data.error;
+    if (typeof data?.error?.message === 'string') return data.error.message;
+    return fallback;
   } catch {
     try {
       const text = await response.clone().text();
-      return text || fallback;
+      return text.slice(0, 500) || fallback;
     } catch {
       return fallback;
     }
@@ -435,19 +464,46 @@ async function analyzeMultipart(formData) {
     };
   } else if (sourceType === 'video-url') {
     const normalizedUrl = normalizePasteableLink(url);
-    if (normalizedUrl && isYouTubeUrl(normalizedUrl)) {
-      requestBody = {
-        contents: [{
-          parts: [
-            { file_data: { file_uri: normalizedUrl } },
-            { text: prompt }
-          ]
-        }]
-      };
+    if (normalizedUrl && isDirectVideoUrl(normalizedUrl)) {
+      // Direct video file link — download server-side and upload to Gemini
+      try {
+        const sourceFile = await loadVideoFromUrl(normalizedUrl);
+        const uploadedFile = await uploadVideoFile(sourceFile);
+        if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI from direct video URL.');
+        requestBody = {
+          contents: [{
+            parts: [
+              { file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' } },
+              { text: prompt }
+            ]
+          }]
+        };
+      } catch (err) {
+        // Fallback: treat as generic URL if download fails
+        requestBody = {
+          contents: [{
+            parts: [{ text: `${prompt}\n\nDirect video URL (could not download server-side):\n${normalizedUrl}` }]
+          }],
+          tools: [{ url_context: {} }]
+        };
+      }
     } else if (normalizedUrl) {
+      const platform = getUrlPlatform(normalizedUrl);
+      let videoLinkHint;
+      if (platform === 'youtube') {
+        videoLinkHint = 'This is a YouTube link. Use URL context to read the public page — title, description, and transcript if available. Base your analysis on this metadata and the user context provided.';
+      } else if (platform === 'tiktok' || platform === 'instagram') {
+        videoLinkHint = `This is a ${platform === 'tiktok' ? 'TikTok' : 'Instagram'} link. IMPORTANT: You cannot access the actual video content from this URL — the page requires authentication. Base your analysis on: (1) any context the user provided below, (2) the URL structure and username if visible, (3) general best practices for this platform. Be transparent in your summary that video content was not directly accessible and the score is based on context only.`;
+      } else if (platform === 'vk') {
+        videoLinkHint = 'This is a VK Video link. Use URL context to read any accessible public page metadata. Note in your summary if video content was not directly accessible.';
+      } else if (platform === 'telegram') {
+        videoLinkHint = 'This is a Telegram link. Use URL context if the post is publicly accessible. Note in your summary if content was not directly accessible.';
+      } else {
+        videoLinkHint = 'Use URL context to read public page metadata and visible text. If the page is not accessible, note this in your summary and base your analysis on the user-provided context.';
+      }
       requestBody = {
         contents: [{
-          parts: [{ text: `${prompt}\n\nPublic URL:\n${normalizedUrl}` }]
+          parts: [{ text: `${prompt}\n\n${videoLinkHint}\n\nPublic URL:\n${normalizedUrl}` }]
         }],
         tools: [{ url_context: {} }]
       };
@@ -612,6 +668,32 @@ async function readFormData(req, url) {
   return request.formData();
 }
 
+async function handleBlobClientUpload(req, url) {
+  if (!BLOB_READ_WRITE_TOKEN) {
+    const error = new Error('BLOB_READ_WRITE_TOKEN is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+  const request = new Request(url.toString(), {
+    method: req.method,
+    headers: req.headers,
+    body: Readable.toWeb(req),
+    duplex: 'half'
+  });
+  const body = await request.json();
+  return handleUpload({
+    body,
+    request,
+    onBeforeGenerateToken: async () => ({
+      allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'application/octet-stream'],
+      addRandomSuffix: true
+    }),
+    onUploadCompleted: async ({ blob }) => {
+      console.log('Blob upload completed:', blob?.url || '');
+    }
+  });
+}
+
 export default async function handler(req, res) {
   try {
     const url = new URL(req.url || '/', 'http://localhost');
@@ -629,8 +711,13 @@ export default async function handler(req, res) {
       return sendJson(res, 200, {
         ok: true,
         geminiConfigured: Boolean(GEMINI_API_KEY),
-        botConfigured: Boolean(BOT_TOKEN)
+        botConfigured: Boolean(BOT_TOKEN),
+        blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN)
       });
+    }
+
+    if (req.method === 'POST' && path === '/api/blob/upload') {
+      return sendJson(res, 200, await handleBlobClientUpload(req, url));
     }
 
     if (req.method === 'GET' && path === '/api/status') {
