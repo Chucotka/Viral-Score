@@ -750,6 +750,7 @@ async function handleBlobClientUpload(req, url) {
     error.statusCode = 500;
     throw error;
   }
+  // url must use the real public host so handleUpload generates a valid callback URL
   const request = new Request(url.toString(), {
     method: req.method,
     headers: req.headers,
@@ -765,14 +766,18 @@ async function handleBlobClientUpload(req, url) {
       addRandomSuffix: true
     }),
     onUploadCompleted: async ({ blob }) => {
-      console.log('Blob upload completed:', blob?.url || '');
+      try { console.log('Blob upload completed:', blob?.url || ''); } catch {}
     }
   });
 }
 
 export default async function handler(req, res) {
   try {
-    const url = new URL(req.url || '/', 'http://localhost');
+    // Reconstruct public URL from forwarded headers (Vercel sets x-forwarded-host)
+    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
+    const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+    const baseUrl = host ? `${proto}://${host}` : 'https://viral-score.vercel.app';
+    const url = new URL(req.url || '/', baseUrl);
     const path = url.pathname;
 
     if (req.method === 'OPTIONS') {
