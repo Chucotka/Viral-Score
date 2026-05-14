@@ -1,6 +1,9 @@
 import { Readable } from 'node:stream';
 import { handleUpload } from '@vercel/blob/client';
 
+/** Vercel Pro/Enterprise: up to 800s (Hobby stays capped at 300s by plan). */
+export const maxDuration = 800;
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
