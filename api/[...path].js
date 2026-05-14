@@ -4,7 +4,8 @@ import { handleUpload } from '@vercel/blob/client';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
-const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
+// Fastest models first — fewer round-trips when the first model succeeds
+const MODEL_CANDIDATES = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -185,15 +186,6 @@ function getPromptBase({ platform, mode, sourceType, language, context }) {
   ].join(' ');
 }
 
-function isYouTubeUrl(value) {
-  try {
-    const url = new URL(value);
-    return url.hostname.includes('youtube.com') || url.hostname.includes('youtu.be');
-  } catch {
-    return false;
-  }
-}
-
 function isDirectVideoUrl(value) {
   try {
     const url = new URL(value);
@@ -263,6 +255,42 @@ function extractClientIdFromPayload(payload) {
   return normalizeClientId(text);
 }
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Poll Gemini file state: immediate first check, then backoff up to ~2.8s (faster than fixed 2s). */
+async function waitGeminiFileProcessed(uploadName, mimeType, partial = {}) {
+  let state = partial.state || 'ACTIVE';
+  if (!uploadName || state === 'ACTIVE') {
+    return { ...partial, mimeType: mimeType || partial.mimeType, state: 'ACTIVE' };
+  }
+  const started = Date.now();
+  let delayMs = 0;
+  while (Date.now() - started < 120000) {
+    if (delayMs) await sleep(delayMs);
+    delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
+    const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+    if (!statusResponse.ok) continue;
+    const statusData = await statusResponse.json();
+    state = statusData.state;
+    if (state === 'ACTIVE') return { ...statusData, mimeType: mimeType || statusData.mimeType };
+    if (state === 'FAILED') throw new Error('Gemini file processing failed.');
+  }
+  throw new Error('Timed out waiting for uploaded video processing.');
+}
+
+function geminiFileResourcePath(fileUri) {
+  const s = String(fileUri || '').trim();
+  if (!s) return '';
+  if (/^files\/[^/?]+/.test(s)) return s.split('?')[0];
+  try {
+    const u = new URL(s);
+    const m = u.pathname.match(/\/(files\/[^/?]+)/);
+    return m ? m[1] : '';
+  } catch {
+    return '';
+  }
+}
+
 async function getApiError(response, fallback) {
   try {
     const data = await response.clone().json();
@@ -326,17 +354,7 @@ async function uploadVideoFile(file) {
   const uploadName = uploadedFile.name || uploadData.name;
   let fileState = uploadedFile.state || 'ACTIVE';
   if (uploadName && fileState !== 'ACTIVE') {
-    const started = Date.now();
-    while (Date.now() - started < 120000) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
-      if (!statusResponse.ok) continue;
-      const statusData = await statusResponse.json();
-      fileState = statusData.state;
-      if (fileState === 'ACTIVE') return { ...statusData, mimeType: fileType };
-      if (fileState === 'FAILED') throw new Error('Gemini file processing failed.');
-    }
-    throw new Error('Timed out waiting for uploaded video processing.');
+    return waitGeminiFileProcessed(uploadName, fileType, uploadedFile);
   }
   return { ...uploadedFile, mimeType: fileType };
 }
@@ -347,7 +365,11 @@ async function uploadVideoFromBlobUrl(videoUrl) {
   let contentLength = '0';
   let mimeType = 'video/mp4';
   try {
-    const headRes = await fetch(videoUrl, { method: 'HEAD' });
+    const headOpts = { method: 'HEAD' };
+    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+      headOpts.signal = AbortSignal.timeout(8000);
+    }
+    const headRes = await fetch(videoUrl, headOpts);
     contentLength = headRes.headers.get('content-length') || '0';
     const ct = headRes.headers.get('content-type') || 'video/mp4';
     // Normalize octet-stream to video type by URL extension
@@ -402,37 +424,16 @@ async function uploadVideoFromBlobUrl(videoUrl) {
   const uploadName = uploadedFile.name || uploadData.name;
   let fileState = uploadedFile.state || 'ACTIVE';
   if (uploadName && fileState !== 'ACTIVE') {
-    const started = Date.now();
-    while (Date.now() - started < 120000) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
-      if (!statusResponse.ok) continue;
-      const statusData = await statusResponse.json();
-      fileState = statusData.state;
-      if (fileState === 'ACTIVE') return { ...statusData, mimeType };
-      if (fileState === 'FAILED') throw new Error('Gemini file processing failed.');
-    }
-    throw new Error('Timed out waiting for uploaded video processing.');
+    return waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
   }
   return { ...uploadedFile, mimeType };
 }
 
-async function loadVideoFromUrl(videoUrl) {
-  const response = await fetch(videoUrl);
-  if (!response.ok) {
-    throw new Error(`Could not load video from URL: ${response.status}`);
-  }
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const contentType = response.headers.get('content-type') || 'video/mp4';
-  const pathname = (() => {
-    try { return new URL(videoUrl).pathname.split('/').filter(Boolean).pop() || 'video.mp4'; }
-    catch { return 'video.mp4'; }
-  })();
-  return { name: pathname, type: contentType, size: buffer.length, body: buffer };
-}
-
-
-async function callGemini(requestBody) {
+async function callGemini(requestBody, mode = 'pro') {
+  const quick = mode === 'quick';
+  const ad = mode === 'ad';
+  const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
+  const maxOutputTokens = quick ? 1536 : 2200;
   let lastError = null;
   for (const model of MODEL_CANDIDATES) {
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
@@ -441,9 +442,9 @@ async function callGemini(requestBody) {
       body: JSON.stringify({
         ...requestBody,
         generationConfig: {
-          temperature: 0.4,
-          topP: 0.95,
-          maxOutputTokens: 4096,
+          temperature,
+          topP: 0.92,
+          maxOutputTokens,
           responseMimeType: 'application/json',
           responseSchema: ANALYSIS_SCHEMA
         }
@@ -466,9 +467,12 @@ function extractModelText(data) {
 function parseModelJson(text) {
   let resultText = text.trim();
   if (resultText.startsWith('```json')) {
-    resultText = resultText.substring(7, resultText.length - 3).trim();
+    resultText = resultText.slice(7).trim();
   } else if (resultText.startsWith('```')) {
-    resultText = resultText.substring(3, resultText.length - 3).trim();
+    resultText = resultText.slice(3).trim();
+  }
+  if (resultText.endsWith('```')) {
+    resultText = resultText.slice(0, -3).trim();
   }
   try {
     return JSON.parse(resultText);
@@ -480,6 +484,32 @@ function parseModelJson(text) {
     }
     throw new Error('Gemini returned incomplete JSON.');
   }
+}
+
+function linkVideoHint(urlPlatform, mode) {
+  const quick = mode === 'quick';
+  if (quick) {
+    if (urlPlatform === 'youtube') return 'YouTube: use url_context (title/description/transcript). Keep JSON tight.';
+    if (urlPlatform === 'tiktok' || urlPlatform === 'instagram') {
+      return `${urlPlatform === 'tiktok' ? 'TikTok' : 'Instagram'}: video often behind login—score from user context + URL; say so in summary.`;
+    }
+    if (urlPlatform === 'vk') return 'VK: url_context for public metadata; note if video unavailable.';
+    if (urlPlatform === 'telegram') return 'Telegram: url_context if t.me post is public.';
+    return 'Use url_context on the URL; if blocked, lean on user context.';
+  }
+  if (urlPlatform === 'youtube') {
+    return 'This is a YouTube link. Use URL context to read the public page — title, description, and transcript if available. Base your analysis on this metadata and the user context provided.';
+  }
+  if (urlPlatform === 'tiktok' || urlPlatform === 'instagram') {
+    return `This is a ${urlPlatform === 'tiktok' ? 'TikTok' : 'Instagram'} link. IMPORTANT: You cannot access the actual video content from this URL — the page requires authentication. Base your analysis on: (1) any context the user provided below, (2) the URL structure and username if visible, (3) general best practices for this platform. Be transparent in your summary that video content was not directly accessible and the score is based on context only.`;
+  }
+  if (urlPlatform === 'vk') {
+    return 'This is a VK Video link. Use URL context to read any accessible public page metadata. Note in your summary if video content was not directly accessible.';
+  }
+  if (urlPlatform === 'telegram') {
+    return 'This is a Telegram link. Use URL context if the post is publicly accessible. Note in your summary if content was not directly accessible.';
+  }
+  return 'Use URL context to read public page metadata and visible text. If the page is not accessible, note this in your summary and base your analysis on the user-provided context.';
 }
 
 async function analyzeMultipart(formData) {
@@ -519,17 +549,32 @@ async function analyzeMultipart(formData) {
 
   let requestBody;
   if (sourceType === 'video-file') {
+    const fileUri = String(formData.get('fileUri') || '').trim();
+    const fileMimeType = String(formData.get('fileMimeType') || 'video/mp4').trim();
     const videoBlobUrl = String(formData.get('videoBlobUrl') || '').trim();
     let uploadedFile = null;
-    if (videoBlobUrl) {
-      // Stream directly from Vercel Blob to Gemini — no memory buffer needed
+    if (fileUri) {
+      const resource = geminiFileResourcePath(fileUri);
+      uploadedFile = { uri: fileUri, mimeType: fileMimeType };
+      if (resource) {
+        const st = await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+        if (st.ok) {
+          const meta = await st.json();
+          if (meta.state && meta.state !== 'ACTIVE') {
+            const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta);
+            uploadedFile = { uri: ready.uri || fileUri, mimeType: fileMimeType || ready.mimeType };
+          }
+        }
+      }
+    } else if (videoBlobUrl) {
+      // Stream from Vercel Blob to Gemini
       uploadedFile = await uploadVideoFromBlobUrl(videoBlobUrl);
     } else if (video && typeof video !== 'string') {
-      // Fallback: file passed directly in formdata (rare, limited to 4.5MB)
+      // Last resort: file in formdata (limited to 4.5MB)
       uploadedFile = await uploadVideoFile(video);
     }
     if (!uploadedFile) throw new Error('Missing uploaded video file.');
-    if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI from Gemini.');
+    if (!uploadedFile.uri) throw new Error('Missing file URI. Upload may have failed.');
     requestBody = {
       contents: [{
         parts: [
@@ -541,10 +586,8 @@ async function analyzeMultipart(formData) {
   } else if (sourceType === 'video-url') {
     const normalizedUrl = normalizePasteableLink(url);
     if (normalizedUrl && isDirectVideoUrl(normalizedUrl)) {
-      // Direct video file link — download server-side and upload to Gemini
       try {
-        const sourceFile = await loadVideoFromUrl(normalizedUrl);
-        const uploadedFile = await uploadVideoFile(sourceFile);
+        const uploadedFile = await uploadVideoFromBlobUrl(normalizedUrl);
         if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI from direct video URL.');
         requestBody = {
           contents: [{
@@ -554,29 +597,17 @@ async function analyzeMultipart(formData) {
             ]
           }]
         };
-      } catch (err) {
-        // Fallback: treat as generic URL if download fails
+      } catch {
         requestBody = {
           contents: [{
-            parts: [{ text: `${prompt}\n\nDirect video URL (could not download server-side):\n${normalizedUrl}` }]
+            parts: [{ text: `${prompt}\n\nDirect video URL (could not stream server-side):\n${normalizedUrl}` }]
           }],
           tools: [{ url_context: {} }]
         };
       }
     } else if (normalizedUrl) {
-      const platform = getUrlPlatform(normalizedUrl);
-      let videoLinkHint;
-      if (platform === 'youtube') {
-        videoLinkHint = 'This is a YouTube link. Use URL context to read the public page — title, description, and transcript if available. Base your analysis on this metadata and the user context provided.';
-      } else if (platform === 'tiktok' || platform === 'instagram') {
-        videoLinkHint = `This is a ${platform === 'tiktok' ? 'TikTok' : 'Instagram'} link. IMPORTANT: You cannot access the actual video content from this URL — the page requires authentication. Base your analysis on: (1) any context the user provided below, (2) the URL structure and username if visible, (3) general best practices for this platform. Be transparent in your summary that video content was not directly accessible and the score is based on context only.`;
-      } else if (platform === 'vk') {
-        videoLinkHint = 'This is a VK Video link. Use URL context to read any accessible public page metadata. Note in your summary if video content was not directly accessible.';
-      } else if (platform === 'telegram') {
-        videoLinkHint = 'This is a Telegram link. Use URL context if the post is publicly accessible. Note in your summary if content was not directly accessible.';
-      } else {
-        videoLinkHint = 'Use URL context to read public page metadata and visible text. If the page is not accessible, note this in your summary and base your analysis on the user-provided context.';
-      }
+      const urlPlatform = getUrlPlatform(normalizedUrl);
+      const videoLinkHint = linkVideoHint(urlPlatform, mode);
       requestBody = {
         contents: [{
           parts: [{ text: `${prompt}\n\n${videoLinkHint}\n\nPublic URL:\n${normalizedUrl}` }]
@@ -594,14 +625,18 @@ async function analyzeMultipart(formData) {
     }
   } else {
     if (!text.trim()) throw new Error('Please paste the caption, transcript, or script.');
+    const rawText = text.trim();
+    const textForModel = mode === 'quick' && rawText.length > 12000
+      ? `${rawText.slice(0, 12000)}\n\n[truncated for speed — core is above]`
+      : rawText;
     requestBody = {
       contents: [{
-        parts: [{ text: `${prompt}\n\nText:\n${text.trim()}` }]
+        parts: [{ text: `${prompt}\n\nText:\n${textForModel}` }]
       }]
     };
   }
 
-  const data = await callGemini(requestBody);
+  const data = await callGemini(requestBody, mode);
   const finishReason = data?.candidates?.[0]?.finishReason;
   if (finishReason === 'MAX_TOKENS') {
     throw new Error('Gemini response was cut off.');
@@ -799,6 +834,49 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && path === '/api/blob/upload') {
       return sendJson(res, 200, await handleBlobClientUpload(req, url));
+    }
+
+    // Start a Gemini resumable upload session so the browser can upload
+    // directly to Google without going through Vercel (no 4.5MB limit).
+    if (req.method === 'POST' && path === '/api/upload-session') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const body = await readJson(req, url);
+      const mimeType = String(body?.mimeType || 'video/mp4').trim();
+      const fileSize = Number(body?.fileSize || 0);
+      const fileName = String(body?.fileName || 'video.mp4').trim().slice(0, 200);
+      const startRes = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': GEMINI_API_KEY,
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': String(fileSize),
+            'X-Goog-Upload-Header-Content-Type': mimeType,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ file: { display_name: fileName } })
+        }
+      );
+      if (!startRes.ok) {
+        return sendJson(res, 502, { error: await getApiError(startRes, `Upload session failed: ${startRes.status}`) });
+      }
+      const uploadUrl = startRes.headers.get('x-goog-upload-url');
+      if (!uploadUrl) return sendJson(res, 502, { error: 'Gemini did not return an upload URL.' });
+      return sendJson(res, 200, { uploadUrl, mimeType, fileName });
+    }
+
+    // Proxy Gemini file status so the browser can poll without the API key.
+    if (req.method === 'GET' && path === '/api/file-status') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const fileName = url.searchParams.get('name');
+      if (!fileName) return sendJson(res, 400, { error: 'name is required.' });
+      const statusRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(fileName)}?key=${encodeURIComponent(GEMINI_API_KEY)}`
+      );
+      if (!statusRes.ok) return sendJson(res, statusRes.status, { error: 'Could not get file status.' });
+      return sendJson(res, 200, await statusRes.json());
     }
 
     if (req.method === 'GET' && path === '/api/status') {
