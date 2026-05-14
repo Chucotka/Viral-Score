@@ -1889,7 +1889,7 @@
         };
 
         const MODEL_CANDIDATES = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.0-flash'];
-        const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'http://127.0.0.1:3000/api/analyze' : '/api/analyze';
+        const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
         const ANALYSIS_SCHEMA = {
             type: 'object',
             properties: {

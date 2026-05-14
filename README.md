@@ -45,6 +45,10 @@ returnUrl=...
 
 Use these params in your payment page or webhook to call `POST /api/unlock` after a successful card payment.
 
+## Vercel deploy
+
+The project also ships with Vercel API routes, so the production app can run on `https://viral-score.vercel.app` without a separate backend server. On Vercel, the frontend uses `/api/analyze` and `/health` directly from the same deployment.
+
 ## Production
 
 - Keep `GEMINI_API_KEY` only on the server.

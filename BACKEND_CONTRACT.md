@@ -10,7 +10,7 @@ Default client endpoint:
 POST /api/analyze
 ```
 
-The URL can be overridden in the app settings for local testing.
+The URL can be overridden in the app settings for local testing. On Vercel, the same endpoint is served from the production deployment.
 
 Health check:
 
@@ -18,6 +18,7 @@ Health check:
 GET /health
 ```
 Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false }`.
+On Vercel, `/health` rewrites to the API route that serves this response.
 
 Client status:
 
