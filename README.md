@@ -35,6 +35,16 @@ Stars invoice links can be generated with `POST /api/stars-invoice-link`.
 Each analysis sends a stable `analysisId` so history stays deduplicated across client and server.
 If your environment blocks `0.0.0.0`, the server binds to `127.0.0.1`.
 
+External card checkout can be configured in the app settings. The app appends:
+
+```txt
+clientId=...
+method=card
+returnUrl=...
+```
+
+Use these params in your payment page or webhook to call `POST /api/unlock` after a successful card payment.
+
 ## Production
 
 - Keep `GEMINI_API_KEY` only on the server.

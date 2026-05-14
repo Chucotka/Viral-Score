@@ -43,6 +43,14 @@ Payment payload:
 GET /api/payment-payload?clientId=...&method=stars
 ```
 
+External card checkout:
+
+```txt
+https://your-checkout.example/pay?clientId=...&method=card&returnUrl=...
+```
+
+After a successful card payment, the external checkout or its webhook should call `POST /api/unlock`.
+
 Stars invoice link:
 
 ```txt

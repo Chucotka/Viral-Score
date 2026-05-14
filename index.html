@@ -1282,6 +1282,7 @@
                 <div class="source-note" id="quota-label"></div>
                 <div class="preview-actions" style="margin-top:12px;">
                     <button class="secondary-btn" id="stars-pay-btn" type="button" data-i18n="unlockStars">Unlock with Stars</button>
+                    <button class="secondary-btn" id="card-pay-btn" type="button" data-i18n="payCard">Pay by card</button>
                     <button class="secondary-btn" id="tribute-pay-btn" type="button" data-i18n="supportTribute">Support via Tribute</button>
                 </div>
             </div>
@@ -1439,6 +1440,11 @@
             </div>
 
             <div class="input-group">
+                <label for="card-checkout-url-input" data-i18n="cardCheckoutUrlLabel">Card checkout URL</label>
+                <input type="url" id="card-checkout-url-input" placeholder="https://checkout.example.com/pay">
+            </div>
+
+            <div class="input-group">
                 <label for="free-limit-input" data-i18n="freeLimitLabel">Free analyses</label>
                 <input type="number" id="free-limit-input" min="0" step="1" placeholder="3">
             </div>
@@ -1493,6 +1499,7 @@
         const analyzeBtnLabel = analyzeBtn.querySelector('[data-i18n="analyzeButton"]');
         const analyzeAgainBtn = document.getElementById('analyze-again-btn');
         const starsPayBtn = document.getElementById('stars-pay-btn');
+        const cardPayBtn = document.getElementById('card-pay-btn');
         const tributePayBtn = document.getElementById('tribute-pay-btn');
         const settingsStatus = document.getElementById('settings-status');
         const loadingTextElement = document.getElementById('loading-text');
@@ -1552,6 +1559,7 @@
             starsInvoiceUrl: 'viral_score_stars_invoice_url_v1',
             starsPrice: 'viral_score_stars_price_v1',
             tributeUrl: 'viral_score_tribute_url_v1',
+            cardCheckoutUrl: 'viral_score_card_checkout_url_v1',
             freeLimit: 'viral_score_free_limit_v1',
             botUsername: 'viral_score_bot_username_v1',
             clientId: 'viral_score_client_id_v1',
@@ -1620,6 +1628,7 @@
                 starsPriceLabel: 'Stars price',
                 generateStarsInvoice: 'Generate Stars invoice link',
                 tributeUrlLabel: 'Tribute link',
+                cardCheckoutUrlLabel: 'Card checkout URL',
                 freeLimitLabel: 'Free analyses',
                 botUsernameLabel: 'Telegram bot username',
                 copyBotLink: 'Copy bot link',
@@ -1636,7 +1645,7 @@
                 launchBotReady: 'Bot username saved',
                 launchBotMissing: 'Add the bot username so sharing points users back to the app.',
                 launchPaymentsReady: 'Payment link configured',
-                launchPaymentsMissing: 'Add Stars invoice URL, Tribute link, or both for the selected billing mode.',
+                launchPaymentsMissing: 'Add Stars invoice URL, card checkout URL, Tribute link, or one of them for the selected billing mode.',
                 launchStarsReady: 'Stars invoice generator ready',
                 launchStarsMissing: 'Add BOT_TOKEN on the server to generate Stars invoice links.',
                 starsInvoiceTitle: 'Viral Score access',
@@ -1648,6 +1657,7 @@
                 starsPayloadCopied: 'Stars payload copied.',
                 botLinkCopied: 'Bot link copied.',
                 unlockStars: 'Unlock with Stars',
+                payCard: 'Pay by card',
                 supportTribute: 'Support via Tribute',
                 backendChecking: 'Backend checking...',
                 backendConnected: 'Backend connected',
@@ -1706,11 +1716,12 @@
                 copyMain: 'Copy hook',
                 paidWithStars: 'Access unlocked with Stars.',
                 starsMissing: 'Add a Stars invoice URL in Settings.',
+                cardMissing: 'Add a card checkout URL in Settings.',
                 tributeMissing: 'Add a Tribute link in Settings.',
-                billingBothMissing: 'Add a Stars invoice URL or a Tribute link in Settings.',
+                billingBothMissing: 'Add a Stars invoice URL, card checkout URL, or Tribute link in Settings.',
                 paywallStarsOnly: 'Free quota ended. Unlock with Stars to keep analyzing.',
                 paywallTributeOnly: 'Free quota ended. Support via Tribute to keep analyzing.',
-                paywallBoth: 'Free quota ended. Unlock with Stars or support via Tribute.',
+                paywallBoth: 'Free quota ended. Unlock with Stars, pay by card, or support via Tribute.',
                 quotaLabel: count => `Free analyses used: ${count}`,
                 quotaLabelLimit: (count, limit) => `${count}/${limit} free analyses used`,
                 shareText: score => `⚡ My post scored ${score}/100 on Viral Score!\n\n🔥 Try it yourself →`
@@ -1775,6 +1786,7 @@
                 starsPriceLabel: 'Цена в Stars',
                 generateStarsInvoice: 'Сгенерировать ссылку Stars',
                 tributeUrlLabel: 'Ссылка Tribute',
+                cardCheckoutUrlLabel: 'URL оплаты картой',
                 freeLimitLabel: 'Бесплатных анализов',
                 botUsernameLabel: 'Имя Telegram-бота',
                 copyBotLink: 'Копировать ссылку бота',
@@ -1791,7 +1803,7 @@
                 launchBotReady: 'Имя бота сохранено',
                 launchBotMissing: 'Добавь имя бота, чтобы шаринг возвращал пользователей в приложение.',
                 launchPaymentsReady: 'Платёжная ссылка настроена',
-                launchPaymentsMissing: 'Добавь Stars invoice URL, Tribute link или оба варианта для выбранного режима.',
+                launchPaymentsMissing: 'Добавь Stars invoice URL, URL оплаты картой, Tribute link или один из вариантов для выбранного режима.',
                 launchStarsReady: 'Генератор Stars invoice готов',
                 launchStarsMissing: 'Добавь BOT_TOKEN на сервере, чтобы генерировать ссылки Stars.',
                 starsInvoiceTitle: 'Доступ к Viral Score',
@@ -1803,6 +1815,7 @@
                 starsPayloadCopied: 'Payload Stars скопирован.',
                 botLinkCopied: 'Ссылка бота скопирована.',
                 unlockStars: 'Разблокировать Stars',
+                payCard: 'Оплатить картой',
                 supportTribute: 'Поддержать через Tribute',
                 backendChecking: 'Проверяем backend...',
                 backendConnected: 'Backend подключен',
@@ -1861,11 +1874,12 @@
                 copyMain: 'Копировать хук',
                 paidWithStars: 'Доступ разблокирован через Stars.',
                 starsMissing: 'Добавь Stars invoice URL в настройках.',
+                cardMissing: 'Добавь URL оплаты картой в настройках.',
                 tributeMissing: 'Добавь ссылку Tribute в настройках.',
-                billingBothMissing: 'Добавь Stars invoice URL или ссылку Tribute в настройках.',
+                billingBothMissing: 'Добавь Stars invoice URL, URL оплаты картой или ссылку Tribute в настройках.',
                 paywallStarsOnly: 'Бесплатный лимит закончился. Разблокируй доступ через Stars.',
                 paywallTributeOnly: 'Бесплатный лимит закончился. Поддержи проект через Tribute.',
-                paywallBoth: 'Бесплатный лимит закончился. Разблокируй Stars или поддержи через Tribute.',
+                paywallBoth: 'Бесплатный лимит закончился. Разблокируй Stars, оплати картой или поддержи через Tribute.',
                 quotaLabel: count => `Использовано бесплатных анализов: ${count}`,
                 quotaLabelLimit: (count, limit) => `Использовано ${count}/${limit} бесплатных анализов`,
                 shareText: score => `⚡ Мой пост набрал ${score}/100 в Viral Score!\n\n🔥 Попробуй сам →`
@@ -1944,6 +1958,7 @@
             starsInvoiceUrl: localStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '',
             starsPrice: Number(localStorage.getItem(STORAGE_KEYS.starsPrice) || '10'),
             tributeUrl: localStorage.getItem(STORAGE_KEYS.tributeUrl) || '',
+            cardCheckoutUrl: localStorage.getItem(STORAGE_KEYS.cardCheckoutUrl) || '',
             botUsername: localStorage.getItem(STORAGE_KEYS.botUsername) || '',
             clientId: localStorage.getItem(STORAGE_KEYS.clientId) || makeClientId(),
             backendStatus: 'unknown',
@@ -2295,6 +2310,7 @@
             document.getElementById('stars-invoice-input').value = state.starsInvoiceUrl;
             document.getElementById('stars-price-input').value = String(state.starsPrice);
             document.getElementById('tribute-url-input').value = state.tributeUrl;
+            document.getElementById('card-checkout-url-input').value = state.cardCheckoutUrl;
             document.getElementById('free-limit-input').value = String(state.freeLimit);
             botUsernameInput.value = state.botUsername;
             setSettingsStatus('');
@@ -2400,6 +2416,7 @@
             localStorage.setItem(STORAGE_KEYS.starsInvoiceUrl, state.starsInvoiceUrl);
             localStorage.setItem(STORAGE_KEYS.starsPrice, String(state.starsPrice));
             localStorage.setItem(STORAGE_KEYS.tributeUrl, state.tributeUrl);
+            localStorage.setItem(STORAGE_KEYS.cardCheckoutUrl, state.cardCheckoutUrl);
             localStorage.setItem(STORAGE_KEYS.botUsername, state.botUsername);
             localStorage.setItem(STORAGE_KEYS.freeLimit, String(state.freeLimit));
             syncPaymentButtons();
@@ -2415,7 +2432,7 @@
         }
 
         function isPaymentConfigured() {
-            if (state.billingMode === 'both') return Boolean(state.starsInvoiceUrl || state.tributeUrl);
+            if (state.billingMode === 'both') return Boolean(state.starsInvoiceUrl || state.cardCheckoutUrl || state.tributeUrl);
             if (state.billingMode === 'tribute') return Boolean(state.tributeUrl);
             return Boolean(state.starsInvoiceUrl);
         }
@@ -2473,6 +2490,10 @@
             if (starsPayBtn) {
                 starsPayBtn.disabled = !state.starsInvoiceUrl;
                 starsPayBtn.title = state.starsInvoiceUrl ? '' : t('starsMissing');
+            }
+            if (cardPayBtn) {
+                cardPayBtn.disabled = !state.cardCheckoutUrl;
+                cardPayBtn.title = state.cardCheckoutUrl ? '' : t('cardMissing');
             }
             if (tributePayBtn) {
                 tributePayBtn.disabled = !state.tributeUrl;
@@ -2756,6 +2777,31 @@
                 tg.openLink(state.tributeUrl);
             } else {
                 window.open(state.tributeUrl, '_blank');
+            }
+        }
+
+        function openCardCheckout() {
+            if (!state.cardCheckoutUrl) {
+                mainError.textContent = t('cardMissing');
+                mainError.style.display = 'block';
+                return;
+            }
+            let checkoutUrl = state.cardCheckoutUrl;
+            try {
+                const url = new URL(state.cardCheckoutUrl, window.location.href);
+                url.searchParams.set('clientId', state.clientId);
+                url.searchParams.set('method', 'card');
+                if (/^https?:\/\//i.test(window.location.href)) {
+                    url.searchParams.set('returnUrl', window.location.href);
+                }
+                checkoutUrl = url.toString();
+            } catch {
+                // Keep the saved checkout URL if it cannot be parsed.
+            }
+            if (tg && tg.openLink) {
+                tg.openLink(checkoutUrl);
+            } else {
+                window.open(checkoutUrl, '_blank');
             }
         }
 
@@ -3391,6 +3437,7 @@
                 state.starsInvoiceUrl = document.getElementById('stars-invoice-input').value.trim();
                 state.starsPrice = Math.max(1, Math.min(25000, Math.round(Number(document.getElementById('stars-price-input').value || state.starsPrice))));
                 state.tributeUrl = document.getElementById('tribute-url-input').value.trim();
+                state.cardCheckoutUrl = document.getElementById('card-checkout-url-input').value.trim();
                 state.botUsername = normalizeBotUsername(botUsernameInput.value);
                 state.freeLimit = Math.max(0, Number(document.getElementById('free-limit-input').value || '0'));
                 saveMonetizationConfig();
@@ -3410,6 +3457,7 @@
             modeButtons.forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode)));
             platformButtons.forEach(button => button.addEventListener('click', () => setPlatform(button.dataset.platform)));
             starsPayBtn.addEventListener('click', openStarsCheckout);
+            cardPayBtn.addEventListener('click', openCardCheckout);
             tributePayBtn.addEventListener('click', openTributeCheckout);
             retryBtn.addEventListener('click', analyzeContent);
             restoreDraftBtn.addEventListener('click', restoreDraft);
@@ -3477,6 +3525,7 @@
         document.getElementById('stars-invoice-input').value = state.starsInvoiceUrl;
         document.getElementById('stars-price-input').value = String(state.starsPrice);
         document.getElementById('tribute-url-input').value = state.tributeUrl;
+        document.getElementById('card-checkout-url-input').value = state.cardCheckoutUrl;
         botUsernameInput.value = state.botUsername;
         backendUrlInput.value = state.backendUrl;
         document.getElementById('free-limit-input').value = String(state.freeLimit);
