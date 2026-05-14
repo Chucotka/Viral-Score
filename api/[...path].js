@@ -200,6 +200,26 @@ function normalizeUrl(value) {
   }
 }
 
+function extractFirstUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const direct = text.match(/https?:\/\/[^\s<>"']+/i)?.[0]
+    || text.match(/\b(?:www\.)?[a-z0-9.-]+\.[a-z]{2,}(?:\/[^\s<>"']*)?/i)?.[0]
+    || '';
+  if (!direct) return '';
+  const cleaned = direct.replace(/[),.;!?]+$/g, '');
+  const prefixed = /^https?:\/\//i.test(cleaned) ? cleaned : `https://${cleaned}`;
+  try {
+    return new URL(prefixed).toString();
+  } catch {
+    return '';
+  }
+}
+
+function normalizePasteableLink(value) {
+  return normalizeUrl(value) || extractFirstUrl(value);
+}
+
 function buildPaymentPayload(clientId, method = 'stars') {
   return `clientId:${normalizeClientId(clientId)};method:${String(method || 'stars')}`;
 }
@@ -381,9 +401,8 @@ async function analyzeMultipart(formData) {
       }]
     };
   } else if (sourceType === 'video-url') {
-    const normalizedUrl = normalizeUrl(url);
-    if (!normalizedUrl) throw new Error('Please paste a valid URL.');
-    if (isYouTubeUrl(normalizedUrl)) {
+    const normalizedUrl = normalizePasteableLink(url);
+    if (normalizedUrl && isYouTubeUrl(normalizedUrl)) {
       requestBody = {
         contents: [{
           parts: [
@@ -392,13 +411,21 @@ async function analyzeMultipart(formData) {
           ]
         }]
       };
-    } else {
+    } else if (normalizedUrl) {
       requestBody = {
         contents: [{
           parts: [{ text: `${prompt}\n\nPublic URL:\n${normalizedUrl}` }]
         }],
         tools: [{ url_context: {} }]
       };
+    } else if (url.trim()) {
+      requestBody = {
+        contents: [{
+          parts: [{ text: `${prompt}\n\nLink or share text:\n${url.trim()}` }]
+        }]
+      };
+    } else {
+      throw new Error('Please paste a valid URL.');
     }
   } else {
     if (!text.trim()) throw new Error('Please paste the caption, transcript, or script.');
