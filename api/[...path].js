@@ -252,17 +252,21 @@ async function getApiError(response, fallback) {
 }
 
 async function uploadVideoFile(file) {
+  const body = file?.body || file;
+  const fileName = file?.name || 'video.mp4';
+  const fileType = file?.type || body?.type || 'video/mp4';
+  const fileSize = Number(file?.size || body?.size || 0);
   const startResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: 'POST',
     headers: {
       'x-goog-api-key': GEMINI_API_KEY,
       'X-Goog-Upload-Protocol': 'resumable',
       'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': String(file.size),
-      'X-Goog-Upload-Header-Content-Type': file.type || 'video/mp4',
+      'X-Goog-Upload-Header-Content-Length': String(fileSize),
+      'X-Goog-Upload-Header-Content-Type': fileType,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ file: { display_name: file.name } })
+    body: JSON.stringify({ file: { display_name: fileName } })
   });
   if (!startResponse.ok) {
     throw new Error(await getApiError(startResponse, `Upload start failed: ${startResponse.status}`));
@@ -277,20 +281,20 @@ async function uploadVideoFile(file) {
       'X-Goog-Upload-Offset': '0',
       'X-Goog-Upload-Command': 'upload, finalize'
     },
-    body: file
+    body
   });
   if (!uploadResponse.ok) {
     throw new Error(await getApiError(uploadResponse, `File upload failed: ${uploadResponse.status}`));
   }
   const uploadData = await uploadResponse.json();
   const uploadedFile = uploadData.file || uploadData;
-  const fileName = uploadedFile.name || uploadData.name;
+  const uploadName = uploadedFile.name || uploadData.name;
   let fileState = uploadedFile.state || 'ACTIVE';
-  if (fileName && fileState !== 'ACTIVE') {
+  if (uploadName && fileState !== 'ACTIVE') {
     const started = Date.now();
     while (Date.now() - started < 120000) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+      const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
       if (!statusResponse.ok) continue;
       const statusData = await statusResponse.json();
       fileState = statusData.state;
@@ -300,6 +304,28 @@ async function uploadVideoFile(file) {
     throw new Error('Timed out waiting for uploaded video processing.');
   }
   return uploadedFile;
+}
+
+async function loadVideoFromUrl(videoUrl) {
+  const response = await fetch(videoUrl);
+  if (!response.ok) {
+    throw new Error(`Could not load uploaded video from blob URL: ${response.status}`);
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get('content-type') || 'video/mp4';
+  const pathname = (() => {
+    try {
+      return new URL(videoUrl).pathname.split('/').filter(Boolean).pop() || 'video.mp4';
+    } catch {
+      return 'video.mp4';
+    }
+  })();
+  return {
+    name: pathname,
+    type: contentType,
+    size: buffer.length,
+    body: buffer
+  };
 }
 
 async function callGemini(requestBody) {
@@ -389,8 +415,15 @@ async function analyzeMultipart(formData) {
 
   let requestBody;
   if (sourceType === 'video-file') {
-    if (!video || typeof video === 'string') throw new Error('Missing uploaded video file.');
-    const uploadedFile = await uploadVideoFile(video);
+    const videoBlobUrl = String(formData.get('videoBlobUrl') || '').trim();
+    let sourceFile = null;
+    if (videoBlobUrl) {
+      sourceFile = await loadVideoFromUrl(videoBlobUrl);
+    } else if (video && typeof video !== 'string') {
+      sourceFile = video;
+    }
+    if (!sourceFile) throw new Error('Missing uploaded video file.');
+    const uploadedFile = await uploadVideoFile(sourceFile);
     if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI.');
     requestBody = {
       contents: [{

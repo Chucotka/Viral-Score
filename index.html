@@ -1807,6 +1807,7 @@
                 missingFileUri: 'Missing uploaded file URI.',
                 invalidUrl: 'Please paste a valid URL.',
                 invalidText: 'Please paste the caption, transcript, or script.',
+                blobUploadFailed: 'Could not upload the video to storage. Try a smaller file or a YouTube link.',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
                 paidWithStars: 'Access unlocked with Stars.',
@@ -1974,6 +1975,7 @@
                 missingFileUri: 'Не найден URI загруженного файла.',
                 invalidUrl: 'Вставь корректную ссылку.',
                 invalidText: 'Вставь caption, транскрипт или сценарий.',
+                blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
                 paidWithStars: 'Доступ разблокирован через Stars.',
@@ -2081,6 +2083,7 @@
             currentMode: localStorage.getItem(STORAGE_KEYS.lastMode) || 'pro',
             selectedVideoFile: null,
             selectedVideoUrl: '',
+            uploadedVideoBlobUrl: '',
             loadingInterval: null,
             loadingMessages: [],
             lastAnalysisResult: null,
@@ -2333,6 +2336,19 @@
             return normalizeUrl(value) || extractFirstUrl(value);
         }
 
+        async function uploadVideoToBlob(file) {
+            if (!file) throw new Error(t('chooseVideoFirst'));
+            const { upload } = await import('https://esm.sh/@vercel/blob/client');
+            const result = await upload(file.name, file, {
+                access: 'public',
+                handleUploadUrl: '/api/blob/upload'
+            });
+            if (!result?.url) {
+                throw new Error(t('blobUploadFailed'));
+            }
+            return result;
+        }
+
         function getSourceLabel() {
             if (state.currentSourceType === 'video-file') {
                 return state.selectedVideoFile ? `${t('videoFile')} · ${state.selectedVideoFile.name}` : t('videoFile');
@@ -2518,6 +2534,7 @@
 
         function clearVideoSelection() {
             state.selectedVideoFile = null;
+            state.uploadedVideoBlobUrl = '';
             if (state.selectedVideoObjectUrl) {
                 URL.revokeObjectURL(state.selectedVideoObjectUrl);
                 state.selectedVideoObjectUrl = '';
@@ -2531,6 +2548,7 @@
         function handleVideoFile(file) {
             if (!file) return;
             state.selectedVideoFile = file;
+            state.uploadedVideoBlobUrl = '';
             if (state.selectedVideoObjectUrl) URL.revokeObjectURL(state.selectedVideoObjectUrl);
             state.selectedVideoObjectUrl = URL.createObjectURL(file);
             videoPreviewEl.src = state.selectedVideoObjectUrl;
@@ -3457,7 +3475,13 @@
             formData.append('freeLimit', String(state.freeLimit));
             formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
-                formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
+                let videoBlobUrl = state.uploadedVideoBlobUrl;
+                if (!videoBlobUrl) {
+                    const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
+                    videoBlobUrl = uploaded.url;
+                    state.uploadedVideoBlobUrl = videoBlobUrl;
+                }
+                formData.append('videoBlobUrl', videoBlobUrl);
             }
             if (state.currentSourceType === 'video-url') {
                 const urlValue = normalizePasteableLink(postUrlInput.value.trim()) || postUrlInput.value.trim();
