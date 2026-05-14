@@ -219,7 +219,7 @@
             overflow: hidden;
             margin-bottom: 14px;
             border: 1px solid rgba(255,255,255,0.08);
-            background: rgba(255,255,255,0.04);
+            background: #0a0a12;
         }
 
         .intro-visual img {
@@ -228,6 +228,7 @@
             display: block;
             object-fit: cover;
             object-position: center;
+            transition: opacity 0.2s ease;
         }
 
         .status-row {
@@ -1181,7 +1182,7 @@
 
             <div class="intro-card fade-in-up" style="animation-delay: 20ms;">
                 <div class="intro-visual">
-                    <img src="assets/viral-score-hero.png" alt="" loading="eager">
+                    <img id="hero-image" src="" alt="" loading="eager" decoding="async">
                 </div>
                 <div class="intro-title" data-i18n="introTitle">Upload, score, improve</div>
                 <div class="intro-text" data-i18n="introText">Paste a link, upload a short video, or drop in a caption. The app scores virality, explains why, and rewrites the hook, caption, and CTA.</div>
@@ -1519,6 +1520,7 @@
         const videoPreviewEl = document.getElementById('video-preview-el');
         const videoFileMeta = document.getElementById('video-file-meta');
         const removeVideoBtn = document.getElementById('remove-video-btn');
+        const heroImage = document.getElementById('hero-image');
         const postUrlInput = document.getElementById('post-url-input');
         const postInput = document.getElementById('post-input');
         const contextInput = document.getElementById('context-input');
@@ -2603,6 +2605,32 @@
             return String(value || '').trim();
         }
 
+        function initHeroImage() {
+            if (!heroImage) return;
+            const candidates = [];
+            try {
+                candidates.push(new URL('assets/viral-score-hero.png', window.location.href).href);
+            } catch {
+                // ignore
+            }
+            candidates.push('./assets/viral-score-hero.png');
+            candidates.push('assets/viral-score-hero.png');
+            let index = 0;
+            const tryNext = () => {
+                if (index >= candidates.length) {
+                    heroImage.removeAttribute('src');
+                    return;
+                }
+                heroImage.src = candidates[index++];
+            };
+            heroImage.addEventListener('error', tryNext);
+            heroImage.addEventListener('load', () => {
+                heroImage.style.opacity = '1';
+            });
+            heroImage.style.opacity = '0';
+            tryNext();
+        }
+
         function getBackendHealthUrl() {
             return getBackendEndpointUrl('/health');
         }
@@ -3513,6 +3541,7 @@
         setMode(state.currentMode);
         setPlatform(state.currentPlatform);
         setBillingMode(state.billingMode);
+        initHeroImage();
         syncPaymentButtons();
         renderBackendStatusPill();
         renderHistory();
