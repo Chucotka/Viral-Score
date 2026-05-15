@@ -403,6 +403,7 @@ async function uploadVideoFromBlobUrl(videoUrl) {
       'Content-Length': contentLength
     },
     body: buffer
+  });
   if (!uploadResponse.ok) {
     throw new Error(await getApiError(uploadResponse, `File upload to Gemini failed: ${uploadResponse.status}`));
   }
