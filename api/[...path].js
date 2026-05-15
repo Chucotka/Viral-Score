@@ -362,31 +362,22 @@ async function uploadVideoFile(file) {
 
 // Stream a video directly from a URL (e.g. Vercel Blob) to Gemini without buffering in memory
 async function uploadVideoFromBlobUrl(videoUrl) {
-  // Get file metadata via HEAD request first
-  let contentLength = '0';
-  let mimeType = 'video/mp4';
-  try {
-    const headOpts = { method: 'HEAD' };
-    if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-      headOpts.signal = AbortSignal.timeout(8000);
-    }
-    const headRes = await fetch(videoUrl, headOpts);
-    contentLength = headRes.headers.get('content-length') || '0';
-    const ct = headRes.headers.get('content-type') || 'video/mp4';
-    // Normalize octet-stream to video type by URL extension
-    mimeType = ct === 'application/octet-stream'
-      ? (videoUrl.toLowerCase().includes('.mov') ? 'video/quicktime'
-        : videoUrl.toLowerCase().includes('.webm') ? 'video/webm'
-        : 'video/mp4')
-      : ct.split(';')[0].trim() || 'video/mp4';
-  } catch {
-    // Fall through with defaults
-  }
+  // Download into Buffer first — streaming via duplex:half hangs in Vercel runtime
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) throw new Error(`Could not fetch video from storage: ${videoResponse.status}`);
+  const arrayBuffer = await videoResponse.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const contentLength = String(buffer.length);
+  const ct = videoResponse.headers.get('content-type') || 'video/mp4';
+  const mimeType = ct === 'application/octet-stream'
+    ? (videoUrl.toLowerCase().includes('.mov') ? 'video/quicktime'
+      : videoUrl.toLowerCase().includes('.webm') ? 'video/webm'
+      : 'video/mp4')
+    : ct.split(';')[0].trim() || 'video/mp4';
   const fileName = (() => {
     try { return new URL(videoUrl).pathname.split('/').filter(Boolean).pop() || 'video.mp4'; }
     catch { return 'video.mp4'; }
   })();
-  // Start Gemini resumable upload session
   const startResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: 'POST',
     headers: {
@@ -404,19 +395,14 @@ async function uploadVideoFromBlobUrl(videoUrl) {
   }
   const uploadUrl = startResponse.headers.get('x-goog-upload-url');
   if (!uploadUrl) throw new Error('Gemini did not return an upload URL.');
-  // Stream blob → Gemini (no memory buffer)
-  const videoResponse = await fetch(videoUrl);
-  if (!videoResponse.ok) throw new Error(`Could not fetch video from storage: ${videoResponse.status}`);
   const uploadResponse = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
       'X-Goog-Upload-Offset': '0',
       'X-Goog-Upload-Command': 'upload, finalize',
-      ...(contentLength !== '0' ? { 'Content-Length': contentLength } : {})
+      'Content-Length': contentLength
     },
-    body: videoResponse.body,
-    duplex: 'half'
-  });
+    body: buffer
   if (!uploadResponse.ok) {
     throw new Error(await getApiError(uploadResponse, `File upload to Gemini failed: ${uploadResponse.status}`));
   }
