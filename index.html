@@ -1998,6 +1998,7 @@
 
         const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
+        const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         const ANALYSIS_SCHEMA = {
             type: 'object',
             properties: {
@@ -2617,7 +2618,7 @@
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
-            if (state.backendUrl && !shouldUseDirectBackendUpload()) {
+            if (state.backendUrl && !shouldUseDirectBackendUpload(file)) {
                 state.videoBlobCacheKey = cacheKey;
                 state.blobUploadPromise = uploadVideoToBlob(file)
                     .then(result => {
@@ -2753,8 +2754,9 @@
             }
         }
 
-        function shouldUseDirectBackendUpload() {
-            return isLocalBackendUrl() && state.backendHealth?.blobConfigured !== true;
+        function shouldUseDirectBackendUpload(file) {
+            const fileSize = Number(file?.size || state.selectedVideoFile?.size || 0);
+            return isLocalBackendUrl() || (fileSize > 0 && fileSize <= DIRECT_UPLOAD_LIMIT_BYTES);
         }
 
         function renderLaunchChecklist() {
@@ -3582,7 +3584,7 @@
             formData.append('freeLimit', String(state.freeLimit));
             formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
-                if (shouldUseDirectBackendUpload()) {
+                if (shouldUseDirectBackendUpload(state.selectedVideoFile)) {
                     formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
                 } else {
                     if (state.blobUploadPromise) {
