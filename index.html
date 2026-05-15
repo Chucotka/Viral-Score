@@ -3591,13 +3591,17 @@
                             // Prefetch may fail (e.g. offline); fall through to explicit upload.
                         }
                     }
-                    let videoBlobUrl = state.uploadedVideoBlobUrl;
-                    if (!videoBlobUrl) {
+                    let fileUri = state.uploadedFileUri;
+                    let fileMimeType = state.uploadedFileMimeType;
+                    if (!fileUri) {
                         const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                        videoBlobUrl = uploaded.url;
-                        state.uploadedVideoBlobUrl = videoBlobUrl;
+                        fileUri = uploaded.fileUri || uploaded.url;
+                        fileMimeType = uploaded.mimeType || state.selectedVideoFile?.type || 'video/mp4';
+                        state.uploadedFileUri = fileUri;
+                        state.uploadedFileMimeType = fileMimeType;
                     }
-                    formData.append('videoBlobUrl', videoBlobUrl);
+                    formData.append('fileUri', fileUri);
+                    formData.append('fileMimeType', fileMimeType || 'video/mp4');
                 }
             }
             if (state.currentSourceType === 'video-url') {
