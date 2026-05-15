@@ -801,9 +801,7 @@ async function handleTelegramUpdate(update) {
     if (msg.text?.startsWith('/start')) {
       if (chatId) {
         await sendTgMessage(chatId,
-          '👋 Привет! Отправь мне видео (до 2GB) и я передам его в Viral Score для анализа.
-
-После отправки вернись в приложение и нажми Analyze.'
+          '👋 Привет! Отправь мне видео (до 2GB) и я передам его в Viral Score для анализа. После отправки вернись в приложение и нажми Analyze.'
         );
       }
       return { ok: true, handled: true };
