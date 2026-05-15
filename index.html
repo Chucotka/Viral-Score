@@ -2394,37 +2394,36 @@
 
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            if (state.backendHealth && state.backendHealth.blobConfigured === false) {
-                throw new Error(t('blobNotConfigured'));
+            // Use backend /api/upload-session to get a Gemini resumable upload URL,
+            // then upload directly from browser to Google — avoids Vercel 4.5MB limit
+            // and works inside Telegram WebApp (no @vercel/blob CORS issues).
+            const sessionUrl = getBackendEndpointUrl('/api/upload-session');
+            if (!sessionUrl) throw new Error(t('blobNotConfigured'));
+            const sessionRes = await fetch(sessionUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mimeType: file.type || 'video/mp4', fileSize: file.size, fileName: file.name })
+            });
+            if (!sessionRes.ok) {
+                const err = await sessionRes.json().catch(() => ({}));
+                throw new Error(err?.error || t('blobUploadFailed'));
             }
-            const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
-            if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
-            const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
-            // Timeout: abort if blob upload takes longer than 120s
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 120000);
-            try {
-                const result = await upload(file.name, file, {
-                    access: 'public',
-                    handleUploadUrl,
-                    abortSignal: controller.signal
-                });
-                clearTimeout(timeoutId);
-                if (!result?.url) {
-                    throw new Error(t('blobUploadFailed'));
-                }
-                return result;
-            } catch (error) {
-                clearTimeout(timeoutId);
-                const message = String(error?.message || error?.name || '');
-                if (error?.name === 'AbortError' || message.includes('abort')) {
-                    throw new Error(t('blobUploadFailed') + ' (timeout)');
-                }
-                if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
-                    throw new Error(t('blobNotConfigured'));
-                }
-                throw new Error(message || t('blobUploadFailed'));
-            }
+            const { uploadUrl, mimeType } = await sessionRes.json();
+            const uploadRes = await fetch(uploadUrl, {
+                method: 'POST',
+                headers: {
+                    'X-Goog-Upload-Offset': '0',
+                    'X-Goog-Upload-Command': 'upload, finalize',
+                    'Content-Length': String(file.size)
+                },
+                body: file
+            });
+            if (!uploadRes.ok) throw new Error(t('blobUploadFailed'));
+            const uploadData = await uploadRes.json();
+            const uploadedFile = uploadData.file || uploadData;
+            // Return object compatible with existing code that uses result.url
+            // but also carry fileUri so analyzeMultipart can skip re-upload
+            return { url: uploadedFile.uri || '', fileUri: uploadedFile.uri, mimeType, geminiFile: uploadedFile };
         }
 
         function getSourceLabel() {
@@ -2629,6 +2628,8 @@
             if (!file) return;
             state.selectedVideoFile = file;
             state.uploadedVideoBlobUrl = '';
+            state.uploadedVideoFileUri = '';
+            state.uploadedVideoMimeType = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
@@ -3631,13 +3632,27 @@
                             // Prefetch may fail (e.g. offline); fall through to explicit upload.
                         }
                     }
+                    let fileUri = state.uploadedVideoFileUri || '';
+                    let fileMimeType = state.uploadedVideoMimeType || '';
                     let videoBlobUrl = state.uploadedVideoBlobUrl;
-                    if (!videoBlobUrl) {
+                    if (!fileUri && !videoBlobUrl) {
                         const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                        videoBlobUrl = uploaded.url;
-                        state.uploadedVideoBlobUrl = videoBlobUrl;
+                        if (uploaded.fileUri) {
+                            fileUri = uploaded.fileUri;
+                            fileMimeType = uploaded.mimeType || state.selectedVideoFile?.type || 'video/mp4';
+                            state.uploadedVideoFileUri = fileUri;
+                            state.uploadedVideoMimeType = fileMimeType;
+                        } else {
+                            videoBlobUrl = uploaded.url;
+                            state.uploadedVideoBlobUrl = videoBlobUrl;
+                        }
                     }
-                    formData.append('videoBlobUrl', videoBlobUrl);
+                    if (fileUri) {
+                        formData.append('fileUri', fileUri);
+                        formData.append('fileMimeType', fileMimeType);
+                    } else {
+                        formData.append('videoBlobUrl', videoBlobUrl);
+                    }
                 }
             }
             if (state.currentSourceType === 'video-url') {
