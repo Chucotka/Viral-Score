@@ -3485,10 +3485,8 @@
                 while (Date.now() - started < 120000) {
                     if (delayMs) await sleep(delayMs);
                     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
-
                     const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(state.apiKey)}`);
                     if (!statusResponse.ok) continue;
-
                     const statusData = await statusResponse.json();
                     fileState = statusData.state;
                     if (fileState === 'ACTIVE') return statusData;
