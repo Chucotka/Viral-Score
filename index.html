@@ -2096,6 +2096,9 @@
             uploadedVideoBlobUrl: '',
             videoBlobCacheKey: '',
             blobUploadPromise: null,
+            uploadedFileUri: null,
+            uploadedFileMimeType: null,
+            uploadInProgress: false,
             loadingInterval: null,
             loadingMessages: [],
             lastAnalysisResult: null,
@@ -2622,25 +2625,42 @@
             state.uploadedVideoBlobUrl = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
-            const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
-            if (state.backendUrl && !shouldUseDirectBackendUpload(file)) {
-                state.videoBlobCacheKey = cacheKey;
-                state.blobUploadPromise = uploadVideoToBlob(file)
-                    .then(result => {
-                        if (state.videoBlobCacheKey === cacheKey) {
-                            state.uploadedVideoBlobUrl = result.url;
-                        }
-                        state.blobUploadPromise = null;
-                    })
-                    .catch(() => {
-                        state.blobUploadPromise = null;
-                    });
-            }
+            state.uploadedFileUri = null;
+            state.uploadedFileMimeType = null;
+            state.uploadInProgress = false;
+
             if (state.selectedVideoObjectUrl) URL.revokeObjectURL(state.selectedVideoObjectUrl);
             state.selectedVideoObjectUrl = URL.createObjectURL(file);
             videoPreviewEl.src = state.selectedVideoObjectUrl;
             videoFileMeta.textContent = `${file.name} · ${formatBytes(file.size)} · ${file.type || 'video/*'}`;
             videoPreview.classList.remove('hidden');
+
+            // Для больших файлов — сразу загружаем в Gemini при выборе
+            if (state.backendUrl && !shouldUseDirectBackendUpload(file)) {
+                startGeminiUpload(file);
+            }
+        }
+
+        async function startGeminiUpload(file) {
+            state.uploadInProgress = true;
+            analyzeBtn.disabled = true;
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = state.lang === 'ru' ? '⏫ Загрузка видео...' : '⏫ Uploading video...';
+            videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка в Gemini... ' : 'Uploading to Gemini... ') + file.name + ' · ' + formatBytes(file.size);
+            try {
+                const uploaded = await uploadVideoToBlob(file);
+                state.uploadedFileUri = uploaded.fileUri || uploaded.url;
+                state.uploadedFileMimeType = uploaded.mimeType || file.type || 'video/mp4';
+                state.uploadInProgress = false;
+                analyzeBtn.disabled = false;
+                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+                videoFileMeta.textContent = (state.lang === 'ru' ? '✅ Готово к анализу — ' : '✅ Ready — ') + file.name + ' · ' + formatBytes(file.size);
+            } catch (err) {
+                state.uploadInProgress = false;
+                analyzeBtn.disabled = false;
+                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+                videoFileMeta.textContent = (state.lang === 'ru' ? '❌ Ошибка загрузки: ' : '❌ Upload error: ') + (err.message || '');
+                console.error('Gemini pre-upload failed:', err);
+            }
         }
 
         function clearFieldErrors() {
