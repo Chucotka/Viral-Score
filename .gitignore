@@ -1,1 +1,7 @@
 server-state.json
+
+# macOS junk
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
