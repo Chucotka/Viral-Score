@@ -1807,7 +1807,7 @@
                 invalidUrl: 'Please paste a valid URL.',
                 invalidText: 'Please paste the caption, transcript, or script.',
                 blobNotConfigured: 'Video uploads are not configured yet. Create a Vercel Blob store and redeploy.',
-                blobUploadFailed: 'Could not upload the video. Please try again.',
+                blobUploadFailed: 'Could not upload the video to storage. Try a smaller file or a YouTube link.',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
                 paidWithStars: 'Access unlocked with Stars.',
@@ -1977,7 +1977,7 @@
                 invalidUrl: 'Вставь корректную ссылку.',
                 invalidText: 'Вставь caption, транскрипт или сценарий.',
                 blobNotConfigured: 'Загрузка видео ещё не настроена. Создай Vercel Blob store и сделай redeploy.',
-                blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
+                blobUploadFailed: 'Не удалось загрузить видео. Попробуйте ещё раз.',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
                 paidWithStars: 'Доступ разблокирован через Stars.',
@@ -2061,9 +2061,9 @@
         }
 
         const safeStorage = {
-            getItem(key) { try { return localStorage.getItem(key); } catch { return null; } },
-            setItem(key, value) { try { localStorage.setItem(key, value); } catch {} },
-            removeItem(key) { try { localStorage.removeItem(key); } catch {} }
+            getItem(key) { try { return safeStorage.getItem(key); } catch { return null; } },
+            setItem(key, value) { try { safeStorage.setItem(key, value); } catch {} },
+            removeItem(key) { try { safeStorage.removeItem(key); } catch {} }
         };
 
         const state = {
@@ -2394,33 +2394,28 @@
 
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            // Upload directly from Mini App to Gemini through Edge Function
-            const uploadUrl = getBackendEndpointUrl('/api/upload-edge');
-            if (!uploadUrl) throw new Error(t('blobNotConfigured'));
-
-            const uploadRes = await fetch(uploadUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': file.type || 'video/mp4',
-                    'X-Mime-Type': file.type || 'video/mp4',
-                    'X-File-Size': String(file.size || 0),
-                    'X-File-Name': file.name || 'video.mp4'
-                },
-                body: file
-            });
-
-            const uploadJson = await uploadRes.json().catch(() => ({}));
-            if (!uploadRes.ok) {
-                throw new Error(uploadJson?.error || t('blobUploadFailed'));
+            if (state.backendHealth && state.backendHealth.blobConfigured === false) {
+                throw new Error(t('blobNotConfigured'));
             }
-
-            const uploadedFile = uploadJson.file || {};
-            return {
-                url: uploadedFile.uri || '',
-                fileUri: uploadedFile.uri || '',
-                mimeType: uploadJson.mimeType || file.type || 'video/mp4',
-                geminiFile: uploadedFile
-            };
+            const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
+            if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
+            const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
+            try {
+                const result = await upload(file.name, file, {
+                    access: 'public',
+                    handleUploadUrl
+                });
+                if (!result?.url) {
+                    throw new Error(t('blobUploadFailed'));
+                }
+                return result;
+            } catch (error) {
+                const message = String(error?.message || '');
+                if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
+                    throw new Error(t('blobNotConfigured'));
+                }
+                throw new Error(message || t('blobUploadFailed'));
+            }
         }
 
         function getSourceLabel() {
@@ -2625,8 +2620,6 @@
             if (!file) return;
             state.selectedVideoFile = file;
             state.uploadedVideoBlobUrl = '';
-            state.uploadedVideoFileUri = '';
-            state.uploadedVideoMimeType = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
@@ -2639,8 +2632,7 @@
                         }
                         state.blobUploadPromise = null;
                     })
-                    .catch((err) => {
-                        console.warn('[Blob prefetch error]', err?.message || err);
+                    .catch(() => {
                         state.blobUploadPromise = null;
                     });
             }
@@ -3471,33 +3463,27 @@
 
         async function uploadVideoFile(file) {
             const result = await uploadVideoToBlob(file);
-            const uploadedFile = result?.geminiFile || {};
-            const fileName = uploadedFile.name || '';
-            let fileState = uploadedFile.state || 'PROCESSING';
-
-            if (!fileName) {
-                throw new Error(t('blobUploadFailed'));
-            }
-
+            const geminiFile = result?.geminiFile || {};
+            const fileName = geminiFile.name || '';
+            let fileState = geminiFile.state || 'PROCESSING';
+            if (!fileName) throw new Error(t('blobUploadFailed'));
             if (fileState !== 'ACTIVE') {
                 const started = Date.now();
                 let delayMs = 0;
                 while (Date.now() - started < 120000) {
                     if (delayMs) await sleep(delayMs);
                     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
-                    const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(state.apiKey)}`);
-                    if (!statusResponse.ok) continue;
-                    const statusData = await statusResponse.json();
-                    fileState = statusData.state;
-                    if (fileState === 'ACTIVE') return statusData;
+                    const pollRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(state.apiKey)}`);
+                    if (!pollRes.ok) continue;
+                    const pollData = await pollRes.json();
+                    fileState = pollData.state;
+                    if (fileState === 'ACTIVE') return pollData;
                     if (fileState === 'FAILED') throw new Error(t('fileProcessFailed'));
                 }
                 throw new Error(t('fileProcessTimeout'));
             }
-
-            return uploadedFile;
+            return geminiFile;
         }
-
         function sleep(ms) {
             return new Promise(resolve => setTimeout(resolve, ms));
         }
@@ -3605,27 +3591,13 @@
                             // Prefetch may fail (e.g. offline); fall through to explicit upload.
                         }
                     }
-                    let fileUri = state.uploadedVideoFileUri || '';
-                    let fileMimeType = state.uploadedVideoMimeType || '';
                     let videoBlobUrl = state.uploadedVideoBlobUrl;
-                    if (!fileUri && !videoBlobUrl) {
+                    if (!videoBlobUrl) {
                         const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                        if (uploaded.fileUri) {
-                            fileUri = uploaded.fileUri;
-                            fileMimeType = uploaded.mimeType || state.selectedVideoFile?.type || 'video/mp4';
-                            state.uploadedVideoFileUri = fileUri;
-                            state.uploadedVideoMimeType = fileMimeType;
-                        } else {
-                            videoBlobUrl = uploaded.url;
-                            state.uploadedVideoBlobUrl = videoBlobUrl;
-                        }
+                        videoBlobUrl = uploaded.url;
+                        state.uploadedVideoBlobUrl = videoBlobUrl;
                     }
-                    if (fileUri) {
-                        formData.append('fileUri', fileUri);
-                        formData.append('fileMimeType', fileMimeType);
-                    } else {
-                        formData.append('videoBlobUrl', videoBlobUrl);
-                    }
+                    formData.append('videoBlobUrl', videoBlobUrl);
                 }
             }
             if (state.currentSourceType === 'video-url') {
