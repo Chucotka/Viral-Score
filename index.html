@@ -2394,27 +2394,19 @@
 
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            // POST raw video to our proxy /api/upload-video — server streams to Gemini.
-            // Avoids CORS restriction on generativelanguage.googleapis.com.
-            const uploadUrl = getBackendEndpointUrl('/api/upload-video');
-            if (!uploadUrl) throw new Error(t('blobNotConfigured'));
-            const uploadRes = await fetch(uploadUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': file.type || 'video/mp4',
-                    'X-Mime-Type': file.type || 'video/mp4',
-                    'X-File-Size': String(file.size),
-                    'X-File-Name': file.name
-                },
-                body: file
-            });
-            if (!uploadRes.ok) {
-                const err = await uploadRes.json().catch(() => ({}));
-                console.error('[upload-video error]', uploadRes.status, err);
-                throw new Error(err?.error || t('blobUploadFailed'));
+            // Check if video was uploaded via Telegram bot (/api/tg-file)
+            const tgFileUrl = getBackendEndpointUrl('/api/tg-file');
+            if (tgFileUrl && state.clientId) {
+                const checkUrl = tgFileUrl + '?clientId=' + encodeURIComponent(state.clientId);
+                const tgRes = await fetch(checkUrl);
+                if (tgRes.ok) {
+                    const { file: uploadedFile, mimeType } = await tgRes.json();
+                    return { url: uploadedFile.uri || '', fileUri: uploadedFile.uri, mimeType, geminiFile: uploadedFile };
+                }
             }
-            const { file: uploadedFile, mimeType } = await uploadRes.json();
-            return { url: uploadedFile.uri || '', fileUri: uploadedFile.uri, mimeType, geminiFile: uploadedFile };
+            throw new Error(state.lang === 'ru'
+                ? '📤 Отправь видео боту в Telegram, затем нажми Analyze снова.'
+                : '📤 Send the video to the bot in Telegram, then tap Analyze again.');
         }
 
         function getSourceLabel() {
