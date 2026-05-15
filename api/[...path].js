@@ -748,13 +748,15 @@ async function handleTelegramUpdate(update) {
 }
 
 async function readJson(req, url) {
-  const request = new Request(url.toString(), {
-    method: req.method,
-    headers: req.headers,
-    body: Readable.toWeb(req),
-    duplex: 'half'
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+      catch (e) { reject(e); }
+    });
+    req.on('error', reject);
   });
-  return request.json();
 }
 
 async function readFormData(req, url) {
