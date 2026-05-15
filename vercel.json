@@ -8,6 +8,7 @@
   "rewrites": [
     { "source": "/health", "destination": "/api/health" },
     { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/api/upload-edge", "destination": "/api/upload-edge" },
     { "source": "/api/(.*)", "destination": "/api/[...path]" }
   ]
 }
