@@ -1,33 +1,34 @@
-export const config = { runtime: 'edge' };
+// Node.js runtime — no 4.5 MB Edge body limit
+export const config = { runtime: 'nodejs', maxDuration: 300 };
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
-export default async function handler(req) {
-  const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,X-Mime-Type,X-File-Size,X-File-Name',
-  };
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Mime-Type,X-File-Size,X-File-Name');
 
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders });
+    return res.status(204).end();
   }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'POST required' }), {
-      status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return res.status(405).json({ error: 'POST required' });
   }
 
   if (!GEMINI_API_KEY) {
-    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY not configured' }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
   }
 
-  const mimeType = req.headers.get('x-mime-type') || req.headers.get('content-type') || 'video/mp4';
-  const fileSize = req.headers.get('x-file-size') || '0';
-  const fileName = (req.headers.get('x-file-name') || 'video.mp4').slice(0, 200);
+  const mimeType = req.headers['x-mime-type'] || req.headers['content-type'] || 'video/mp4';
+  const fileSize = req.headers['x-file-size'] || '0';
+  const fileName = (req.headers['x-file-name'] || 'video.mp4').slice(0, 200);
+
+  // Buffer the entire body
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const buffer = Buffer.concat(chunks);
+  const actualSize = String(buffer.length);
 
   // Step 1: start resumable upload session with Gemini
   const startRes = await fetch(
@@ -38,7 +39,7 @@ export default async function handler(req) {
         'x-goog-api-key': GEMINI_API_KEY,
         'X-Goog-Upload-Protocol': 'resumable',
         'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': fileSize,
+        'X-Goog-Upload-Header-Content-Length': actualSize,
         'X-Goog-Upload-Header-Content-Type': mimeType,
         'Content-Type': 'application/json',
       },
@@ -48,42 +49,33 @@ export default async function handler(req) {
 
   if (!startRes.ok) {
     const errText = await startRes.text();
-    return new Response(JSON.stringify({ error: `Gemini start failed: ${startRes.status} ${errText}` }), {
-      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return res.status(502).json({ error: `Gemini start failed: ${startRes.status} ${errText}` });
   }
 
   const uploadUrl = startRes.headers.get('x-goog-upload-url');
   if (!uploadUrl) {
-    return new Response(JSON.stringify({ error: 'No upload URL from Gemini' }), {
-      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return res.status(502).json({ error: 'No upload URL from Gemini' });
   }
 
-  // Step 2: stream body directly to Gemini
+  // Step 2: upload buffer to Gemini
   const uploadRes = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
       'X-Goog-Upload-Offset': '0',
       'X-Goog-Upload-Command': 'upload, finalize',
-      'Content-Length': fileSize,
+      'Content-Length': actualSize,
       'Content-Type': mimeType,
     },
-    body: req.body,
-    duplex: 'half',
+    body: buffer,
   });
 
   if (!uploadRes.ok) {
     const errText = await uploadRes.text();
-    return new Response(JSON.stringify({ error: `Gemini upload failed: ${uploadRes.status} ${errText}` }), {
-      status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    });
+    return res.status(502).json({ error: `Gemini upload failed: ${uploadRes.status} ${errText}` });
   }
 
   const uploadData = await uploadRes.json();
   const uploadedFile = uploadData.file || uploadData;
 
-  return new Response(JSON.stringify({ file: uploadedFile, mimeType }), {
-    status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-  });
+  return res.status(200).json({ file: uploadedFile, mimeType });
 }
