@@ -3470,48 +3470,25 @@
         }
 
         async function uploadVideoFile(file) {
-            const startResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(state.apiKey)}`, {
-                method: 'POST',
-                headers: {
-                    'x-goog-api-key': state.apiKey,
-                    'X-Goog-Upload-Protocol': 'resumable',
-                    'X-Goog-Upload-Command': 'start',
-                    'X-Goog-Upload-Header-Content-Length': String(file.size),
-                    'X-Goog-Upload-Header-Content-Type': file.type || 'video/mp4',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ file: { display_name: file.name } })
-            });
-            if (!startResponse.ok) {
-                throw new Error(await getApiError(startResponse, `Upload start failed: ${startResponse.status}`));
+            const result = await uploadVideoToBlob(file);
+            const uploadedFile = result?.geminiFile || {};
+            const fileName = uploadedFile.name || '';
+            let fileState = uploadedFile.state || 'PROCESSING';
+
+            if (!fileName) {
+                throw new Error(t('blobUploadFailed'));
             }
-            const uploadUrl = startResponse.headers.get('x-goog-upload-url');
-            if (!uploadUrl) {
-                throw new Error(t('missingUploadUrl'));
-            }
-            const uploadResponse = await fetch(uploadUrl, {
-                method: 'POST',
-                headers: {
-                    'X-Goog-Upload-Offset': '0',
-                    'X-Goog-Upload-Command': 'upload, finalize'
-                },
-                body: file
-            });
-            if (!uploadResponse.ok) {
-                throw new Error(await getApiError(uploadResponse, `File upload failed: ${uploadResponse.status}`));
-            }
-            const uploadData = await uploadResponse.json();
-            const uploadedFile = uploadData.file || uploadData;
-            const fileName = uploadedFile.name || uploadData.name;
-            let fileState = uploadedFile.state || 'ACTIVE';
-            if (fileName && fileState !== 'ACTIVE') {
+
+            if (fileState !== 'ACTIVE') {
                 const started = Date.now();
                 let delayMs = 0;
                 while (Date.now() - started < 120000) {
                     if (delayMs) await sleep(delayMs);
                     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
+
                     const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(state.apiKey)}`);
                     if (!statusResponse.ok) continue;
+
                     const statusData = await statusResponse.json();
                     fileState = statusData.state;
                     if (fileState === 'ACTIVE') return statusData;
@@ -3519,6 +3496,7 @@
                 }
                 throw new Error(t('fileProcessTimeout'));
             }
+
             return uploadedFile;
         }
 
