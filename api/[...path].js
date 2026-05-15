@@ -857,6 +857,56 @@ export default async function handler(req, res) {
       return sendJson(res, 200, { uploadUrl, mimeType, fileName });
     }
 
+    // Proxy video upload to Gemini — client POSTs raw video body here,
+    // server streams it to Gemini Files API (bypasses CORS restriction).
+    if (req.method === 'POST' && path === '/api/upload-video') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const mimeType = String(req.headers['x-mime-type'] || 'video/mp4').trim();
+      const fileSize = String(req.headers['x-file-size'] || '0');
+      const fileName = String(req.headers['x-file-name'] || 'video.mp4').trim().slice(0, 200);
+      // Step 1: start resumable upload session
+      const startRes = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': GEMINI_API_KEY,
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': fileSize,
+            'X-Goog-Upload-Header-Content-Type': mimeType,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ file: { display_name: fileName } })
+        }
+      );
+      if (!startRes.ok) return sendJson(res, 502, { error: await getApiError(startRes, `Upload start failed: ${startRes.status}`) });
+      const uploadUrl = startRes.headers.get('x-goog-upload-url');
+      if (!uploadUrl) return sendJson(res, 502, { error: 'Gemini did not return an upload URL.' });
+      // Step 2: buffer incoming body and upload to Gemini
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        req.on('data', c => chunks.push(c));
+        req.on('end', resolve);
+        req.on('error', reject);
+      });
+      const buffer = Buffer.concat(chunks);
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'X-Goog-Upload-Offset': '0',
+          'X-Goog-Upload-Command': 'upload, finalize',
+          'Content-Length': String(buffer.length),
+          'Content-Type': mimeType
+        },
+        body: buffer
+      });
+      if (!uploadRes.ok) return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini upload failed: ${uploadRes.status}`) });
+      const uploadData = await uploadRes.json();
+      const uploadedFile = uploadData.file || uploadData;
+      return sendJson(res, 200, { file: uploadedFile, mimeType });
+    }
+
     // Proxy Gemini file status so the browser can poll without the API key.
     if (req.method === 'GET' && path === '/api/file-status') {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
