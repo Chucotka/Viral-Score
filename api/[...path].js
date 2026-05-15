@@ -6,6 +6,26 @@ export const maxDuration = 300;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+
+// Temporary store for Telegram video file_ids (clientId → {fileId, mimeType, ts})
+const tgVideoStore = new Map();
+function storeTgVideo(clientId, fileId, mimeType) {
+  tgVideoStore.set(clientId, { fileId, mimeType: mimeType || 'video/mp4', ts: Date.now() });
+  // Clean up entries older than 30 minutes
+  for (const [k, v] of tgVideoStore) {
+    if (Date.now() - v.ts > 30 * 60 * 1000) tgVideoStore.delete(k);
+  }
+}
+async function downloadTgFile(fileId) {
+  const infoRes = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getFile?file_id=${encodeURIComponent(fileId)}`);
+  if (!infoRes.ok) throw new Error(`getFile failed: ${infoRes.status}`);
+  const info = await infoRes.json();
+  const filePath = info?.result?.file_path;
+  if (!filePath) throw new Error('No file_path from Telegram');
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
+  if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);
+  return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
+}
 const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
@@ -734,17 +754,63 @@ async function createStarsInvoiceLink({ clientId, title, description, stars }) {
   };
 }
 
+async function sendTgMessage(chatId, text, extra = {}) {
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...extra })
+  });
+}
+
 async function handleTelegramUpdate(update) {
   const payment = update?.message?.successful_payment;
-  if (!payment) {
-    return { ok: true, handled: false };
+  if (payment) {
+    const clientId = extractClientIdFromPayload(payment.invoice_payload);
+    if (!clientId) return { ok: false, error: 'Missing client payload in successful payment.' };
+    const unlocked = unlockClientAccess(clientId, 'stars');
+    return { ok: true, handled: true, ...unlocked };
   }
-  const clientId = extractClientIdFromPayload(payment.invoice_payload);
-  if (!clientId) {
-    return { ok: false, error: 'Missing client payload in successful payment.' };
+
+  // Handle video uploads via bot chat
+  const msg = update?.message;
+  if (msg) {
+    const chatId = msg.chat?.id;
+    // Extract video file info
+    const videoObj = msg.video || msg.document;
+    if (videoObj) {
+      const fileId = videoObj.file_id;
+      const mimeType = videoObj.mime_type || 'video/mp4';
+      // Extract clientId from caption or use chatId as fallback key
+      const caption = String(msg.caption || msg.text || '');
+      const clientMatch = caption.match(/client[_:]?([a-zA-Z0-9_-]{8,})/i);
+      const clientId = clientMatch ? clientMatch[1] : `tg_${chatId}`;
+      storeTgVideo(clientId, fileId, mimeType);
+      if (chatId) {
+        await sendTgMessage(chatId,
+          `✅ Видео получено!
+
+Теперь вернись в приложение и нажми <b>Analyze</b> — анализ начнётся автоматически.
+
+<i>Твой код: <code>${clientId}</code></i>`
+        );
+      }
+      return { ok: true, handled: true, clientId, fileId };
+    }
+
+    // /start command — show instructions
+    if (msg.text?.startsWith('/start')) {
+      if (chatId) {
+        await sendTgMessage(chatId,
+          '👋 Привет! Отправь мне видео (до 2GB) и я передам его в Viral Score для анализа.
+
+После отправки вернись в приложение и нажми Analyze.'
+        );
+      }
+      return { ok: true, handled: true };
+    }
   }
-  const unlocked = unlockClientAccess(clientId, 'stars');
-  return { ok: true, handled: true, ...unlocked };
+
+  return { ok: true, handled: false };
 }
 
 async function readJson(req, url) {
@@ -904,6 +970,53 @@ export default async function handler(req, res) {
       if (!uploadRes.ok) return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini upload failed: ${uploadRes.status}`) });
       const uploadData = await uploadRes.json();
       const uploadedFile = uploadData.file || uploadData;
+      return sendJson(res, 200, { file: uploadedFile, mimeType });
+    }
+
+    // Download video from Telegram CDN and upload to Gemini
+    if (req.method === 'GET' && path === '/api/tg-file') {
+      if (!BOT_TOKEN) return sendJson(res, 500, { error: 'BOT_TOKEN not configured.' });
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured.' });
+      const clientId = url.searchParams.get('clientId') || '';
+      if (!clientId) return sendJson(res, 400, { error: 'clientId required.' });
+      const entry = tgVideoStore.get(clientId);
+      if (!entry) return sendJson(res, 404, { error: 'No video found for this clientId. Send video to bot first.' });
+      const { fileId, mimeType } = entry;
+      const { buffer, filePath } = await downloadTgFile(fileId);
+      const fileName = filePath.split('/').pop() || 'video.mp4';
+      // Upload to Gemini
+      const startRes = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+        {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': GEMINI_API_KEY,
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': String(buffer.length),
+            'X-Goog-Upload-Header-Content-Type': mimeType,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ file: { display_name: fileName } })
+        }
+      );
+      if (!startRes.ok) return sendJson(res, 502, { error: await getApiError(startRes, `Gemini start failed: ${startRes.status}`) });
+      const uploadUrl = startRes.headers.get('x-goog-upload-url');
+      if (!uploadUrl) return sendJson(res, 502, { error: 'No upload URL from Gemini.' });
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'X-Goog-Upload-Offset': '0',
+          'X-Goog-Upload-Command': 'upload, finalize',
+          'Content-Length': String(buffer.length),
+          'Content-Type': mimeType
+        },
+        body: buffer
+      });
+      if (!uploadRes.ok) return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini upload failed: ${uploadRes.status}`) });
+      const uploadData = await uploadRes.json();
+      const uploadedFile = uploadData.file || uploadData;
+      tgVideoStore.delete(clientId); // cleanup after use
       return sendJson(res, 200, { file: uploadedFile, mimeType });
     }
 
