@@ -2413,12 +2413,15 @@
                 method: 'POST',
                 headers: {
                     'X-Goog-Upload-Offset': '0',
-                    'X-Goog-Upload-Command': 'upload, finalize',
-                    'Content-Length': String(file.size)
+                    'X-Goog-Upload-Command': 'upload, finalize'
                 },
                 body: file
             });
-            if (!uploadRes.ok) throw new Error(t('blobUploadFailed'));
+            if (!uploadRes.ok) {
+                const errText = await uploadRes.text().catch(() => uploadRes.status);
+                console.error('[Gemini upload error]', uploadRes.status, errText);
+                throw new Error(t('blobUploadFailed'));
+            }
             const uploadData = await uploadRes.json();
             const uploadedFile = uploadData.file || uploadData;
             // Return object compatible with existing code that uses result.url
