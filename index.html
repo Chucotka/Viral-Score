@@ -2400,17 +2400,26 @@
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
             const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
+            // Timeout: abort if blob upload takes longer than 120s
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
             try {
                 const result = await upload(file.name, file, {
                     access: 'public',
-                    handleUploadUrl
+                    handleUploadUrl,
+                    abortSignal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 if (!result?.url) {
                     throw new Error(t('blobUploadFailed'));
                 }
                 return result;
             } catch (error) {
-                const message = String(error?.message || '');
+                clearTimeout(timeoutId);
+                const message = String(error?.message || error?.name || '');
+                if (error?.name === 'AbortError' || message.includes('abort')) {
+                    throw new Error(t('blobUploadFailed') + ' (timeout)');
+                }
                 if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
                     throw new Error(t('blobNotConfigured'));
                 }
@@ -2632,7 +2641,8 @@
                         }
                         state.blobUploadPromise = null;
                     })
-                    .catch(() => {
+                    .catch((err) => {
+                        console.warn('[Blob prefetch error]', err?.message || err);
                         state.blobUploadPromise = null;
                     });
             }
