@@ -2003,7 +2003,7 @@
             : '/api/analyze';
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         const NETWORK_TIMEOUT_MS = 120000;
-        const ANALYSIS_TIMEOUT_MS = 290000;
+        const ANALYSIS_TIMEOUT_MS = 299000;
         const ANALYSIS_SCHEMA = {
             type: 'object',
             properties: {
@@ -3585,7 +3585,7 @@
             return new Promise(resolve => setTimeout(resolve, ms));
         }
 
-        function buildRequestForSource(prompt, uploadedFile = null) {
+        function buildRequestForSource(prompt, uploadedFile = null, mode = state.currentMode) {
             if (state.currentSourceType === 'video-file') {
                 if (!uploadedFile?.uri) throw new Error(t('missingFileUri'));
                 return {
@@ -3602,7 +3602,7 @@
                 const rawUrl = normalizePasteableLink(rawValue);
                 if (rawUrl) {
                     const urlPlatform = getUrlPlatformForLink(rawUrl);
-                    const videoLinkHint = clientLinkHint(urlPlatform, state.currentMode);
+                    const videoLinkHint = clientLinkHint(urlPlatform, mode);
                     return {
                         contents: [{
                             parts: [
@@ -3623,7 +3623,7 @@
             }
             const text = postInput.value.trim();
             if (!text) throw new Error(t('invalidText'));
-            const textBody = state.currentMode === 'quick' && text.length > 12000
+            const textBody = mode === 'quick' && text.length > 12000
                 ? `${text.slice(0, 12000)}\n\n[truncated for speed — core is above]`
                 : text;
             return {
@@ -3635,10 +3635,10 @@
             };
         }
 
-        async function callGemini(requestBody) {
+        async function callGemini(requestBody, mode = state.currentMode) {
             let lastError = null;
-            const quick = state.currentMode === 'quick';
-            const ad = state.currentMode === 'ad';
+            const quick = mode === 'quick';
+            const ad = mode === 'ad';
             const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
             const maxOutputTokens = quick ? 1536 : 2200;
             for (const model of MODEL_CANDIDATES) {
@@ -3667,10 +3667,14 @@
         async function callAnalysisBackend(analysisId) {
             if (!state.backendUrl) throw new Error(t('backendRequired'));
             const formData = new FormData();
+            const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
+            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > 10 * 1024 * 1024
+                ? 'quick'
+                : state.currentMode;
             if (analysisId) formData.append('analysisId', analysisId);
             formData.append('clientId', state.clientId);
             formData.append('platform', state.currentPlatform);
-            formData.append('mode', state.currentMode);
+            formData.append('mode', effectiveMode);
             formData.append('sourceType', state.currentSourceType);
             formData.append('language', state.lang);
             formData.append('context', contextInput.value.trim());
@@ -3799,6 +3803,10 @@
 
             clearFieldErrors();
             let prompt = buildAnalysisPayload();
+            const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
+            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > 10 * 1024 * 1024
+                ? 'quick'
+                : state.currentMode;
 
             if (state.currentSourceType === 'video-file' && !state.selectedVideoFile) {
                 mainError.textContent = t('chooseVideoFirst');
@@ -3850,8 +3858,8 @@
                     if (state.currentSourceType === 'video-file') {
                         uploadedFile = await uploadVideoFile(state.selectedVideoFile);
                     }
-                    const requestBody = buildRequestForSource(prompt, uploadedFile);
-                    const data = await callGemini(requestBody);
+                    const requestBody = buildRequestForSource(prompt, uploadedFile, effectiveMode);
+                    const data = await callGemini(requestBody, effectiveMode);
                     const finishReason = data?.candidates?.[0]?.finishReason;
                     if (finishReason === 'MAX_TOKENS') {
                         throw new Error(t('maxTokens'));
@@ -3861,7 +3869,7 @@
                 state.lastAnalysisResult = parsed;
                 state.lastAnalysisMeta = {
                     platform: state.currentPlatform,
-                    mode: state.currentMode,
+                    mode: effectiveMode,
                     sourceLabel: getSourceLabel(),
                     sourceType: state.currentSourceType
                 };
