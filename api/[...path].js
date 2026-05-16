@@ -1,5 +1,5 @@
 import { Readable } from 'node:stream';
-import { handleUpload } from '@vercel/blob/client';
+import { handleUpload, generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 
 export const maxDuration = 300;
 
@@ -861,6 +861,32 @@ async function handleBlobClientUpload(req, url) {
   });
 }
 
+async function createBlobClientToken(req, url) {
+  if (!BLOB_READ_WRITE_TOKEN) {
+    const error = new Error('BLOB_READ_WRITE_TOKEN is not configured on the server.');
+    error.statusCode = 500;
+    throw error;
+  }
+  const body = await readJson(req, url).catch(() => ({}));
+  const pathname = String(body?.pathname || body?.fileName || 'video.mp4')
+    .trim()
+    .replace(/^\/+/, '')
+    .slice(0, 200) || 'video.mp4';
+  const contentType = String(body?.contentType || body?.mimeType || 'video/mp4').trim() || 'video/mp4';
+  const clientToken = await generateClientTokenFromReadWriteToken({
+    token: BLOB_READ_WRITE_TOKEN,
+    pathname,
+    validUntil: new Date(Date.now() + 15 * 60 * 1000),
+    addRandomSuffix: true,
+    allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'application/octet-stream'],
+    onUploadCompleted: {
+      callbackUrl: `${url.origin}/api/blob/upload`,
+      tokenPayload: JSON.stringify({ contentType })
+    }
+  });
+  return { clientToken, pathname, contentType };
+}
+
 export default async function handler(req, res) {
   try {
     // Reconstruct public URL from forwarded headers (Vercel sets x-forwarded-host)
@@ -889,6 +915,10 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && path === '/api/blob/upload') {
       return sendJson(res, 200, await handleBlobClientUpload(req, url));
+    }
+
+    if (req.method === 'POST' && path === '/api/blob/client-token') {
+      return sendJson(res, 200, await createBlobClientToken(req, url));
     }
 
     // Start a Gemini resumable upload session so the browser can upload

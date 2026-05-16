@@ -2417,14 +2417,28 @@
 
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
-            if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
+            const tokenEndpoint = getBackendEndpointUrl('/api/blob/client-token');
+            if (!tokenEndpoint) throw new Error(t('blobNotConfigured'));
             const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
             try {
+                const tokenResponse = await fetch(tokenEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        pathname: file.name,
+                        contentType: file.type || 'video/mp4'
+                    })
+                });
+                const tokenData = await tokenResponse.json().catch(() => ({}));
+                if (!tokenResponse.ok || !tokenData?.clientToken) {
+                    throw new Error(tokenData?.error || t('blobNotConfigured'));
+                }
                 const result = await Promise.race([
                     upload(file.name, file, {
                         access: 'public',
-                        handleUploadUrl
+                        token: tokenData.clientToken,
+                        multipart: true,
+                        contentType: file.type || 'video/mp4'
                     }),
                     new Promise((_, reject) => {
                         setTimeout(() => reject(new Error(t('blobUploadFailed'))), NETWORK_TIMEOUT_MS);
