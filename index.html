@@ -1807,7 +1807,7 @@
                 missingFileUri: 'Missing uploaded file URI.',
                 invalidUrl: 'Please paste a valid URL.',
                 invalidText: 'Please paste the caption, transcript, or script.',
-                blobNotConfigured: 'Video uploads are not configured yet. Check the upload endpoint and redeploy.',
+                blobNotConfigured: 'Video uploads are not configured yet. Check the backend upload session and redeploy.',
                 blobUploadFailed: 'Could not upload the video. Try a smaller file or a YouTube link.',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
@@ -1978,7 +1978,7 @@
                 missingFileUri: 'Не найден URI загруженного файла.',
                 invalidUrl: 'Вставь корректную ссылку.',
                 invalidText: 'Вставь caption, транскрипт или сценарий.',
-                blobNotConfigured: 'Загрузка видео ещё не настроена. Проверь upload endpoint и сделай redeploy.',
+                blobNotConfigured: 'Загрузка видео ещё не настроена. Проверь upload session backend и сделай redeploy.',
                 blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
@@ -2416,15 +2416,30 @@
 
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            const uploadUrl = getBackendEndpointUrl('/api/upload-edge');
-            if (!uploadUrl) throw new Error(t('blobNotConfigured'));
+            const sessionUrl = getBackendEndpointUrl('/api/upload-session');
+            if (!sessionUrl) throw new Error(t('blobNotConfigured'));
+            const sessionRes = await fetch(sessionUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mimeType: file.type || 'video/mp4',
+                    fileSize: file.size || 0,
+                    fileName: file.name || 'video.mp4'
+                })
+            });
+            const sessionData = await sessionRes.json().catch(() => ({}));
+            if (!sessionRes.ok) {
+                throw new Error(sessionData?.error || t('blobNotConfigured'));
+            }
+            const uploadUrl = sessionData?.uploadUrl || '';
+            const mimeType = sessionData?.mimeType || file.type || 'video/mp4';
+            if (!uploadUrl) throw new Error('Gemini did not return an upload URL.');
             return new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', uploadUrl);
-                xhr.setRequestHeader('X-Mime-Type', file.type || 'video/mp4');
-                xhr.setRequestHeader('X-File-Size', String(file.size || 0));
-                xhr.setRequestHeader('X-File-Name', file.name || 'video.mp4');
-                xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
+                xhr.setRequestHeader('X-Goog-Upload-Offset', '0');
+                xhr.setRequestHeader('X-Goog-Upload-Command', 'upload, finalize');
+                xhr.setRequestHeader('Content-Type', mimeType);
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable && onProgress) {
                         onProgress(Math.round((e.loaded / e.total) * 100));
@@ -2438,7 +2453,7 @@
                             resolve({
                                 url: uploadedFile.uri || '',
                                 fileUri: uploadedFile.uri || '',
-                                mimeType: data.mimeType || file.type || 'video/mp4',
+                                mimeType: data.mimeType || mimeType,
                                 geminiFile: uploadedFile
                             });
                         } catch {
