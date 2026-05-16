@@ -2397,48 +2397,50 @@
 
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            const uploadUrl = getBackendEndpointUrl('/api/upload-edge');
-            if (!uploadUrl) throw new Error(t('blobNotConfigured'));
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', uploadUrl);
-                xhr.setRequestHeader('X-Mime-Type', file.type || 'video/mp4');
-                xhr.setRequestHeader('X-File-Size', String(file.size || 0));
-                xhr.setRequestHeader('X-File-Name', file.name || 'video.mp4');
-                xhr.setRequestHeader('Content-Type', file.type || 'video/mp4');
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable && onProgress) {
-                        onProgress(Math.round((e.loaded / e.total) * 100));
-                    }
-                };
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            const data = JSON.parse(xhr.responseText);
-                            const uploadedFile = data.file || {};
-                            resolve({
-                                url: uploadedFile.uri || '',
-                                fileUri: uploadedFile.uri || '',
-                                mimeType: data.mimeType || file.type || 'video/mp4',
-                                geminiFile: uploadedFile
-                            });
-                        } catch (e) {
-                            reject(new Error(t('blobUploadFailed')));
-                        }
-                    } else {
-                        try {
-                            const err = JSON.parse(xhr.responseText);
-                            reject(new Error(err.error || t('blobUploadFailed')));
-                        } catch {
-                            reject(new Error(t('blobUploadFailed') + ': ' + xhr.status));
-                        }
-                    }
-                };
-                xhr.onerror = () => reject(new Error(t('blobUploadFailed')));
-                xhr.ontimeout = () => reject(new Error(t('blobUploadFailed') + ': timeout'));
-                xhr.timeout = 300000;
-                xhr.send(file);
+
+            // Step 1: client-side upload to Vercel Blob (no Vercel function body limit)
+            const blobUploadUrl = getBackendEndpointUrl('/api/blob/upload');
+            if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
+
+            const { upload } = await import('https://esm.sh/@vercel/blob@1?bundle-deps');
+
+            const blob = await upload(file.name || 'video.mp4', file, {
+                access: 'public',
+                handleUploadUrl: blobUploadUrl,
+                clientPayload: JSON.stringify({ mimeType: file.type || 'video/mp4' }),
+                onUploadProgress: ({ percentage }) => {
+                    if (onProgress) onProgress(Math.round(percentage * 0.85));
+                },
             });
+
+            if (!blob?.url) throw new Error(t('blobUploadFailed'));
+            if (onProgress) onProgress(90);
+
+            // Step 2: backend pulls from Blob and pushes to Gemini
+            const edgeUrl = getBackendEndpointUrl('/api/upload-edge');
+            if (!edgeUrl) throw new Error(t('blobNotConfigured'));
+
+            const edgeRes = await fetch(edgeUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    blobUrl: blob.url,
+                    mimeType: file.type || 'video/mp4',
+                    fileName: file.name || 'video.mp4',
+                }),
+            });
+
+            if (onProgress) onProgress(99);
+            const edgeData = await edgeRes.json().catch(() => ({}));
+            if (!edgeRes.ok) throw new Error(edgeData.error || t('blobUploadFailed'));
+
+            const uploadedFile = edgeData.file || {};
+            return {
+                url: uploadedFile.uri || '',
+                fileUri: uploadedFile.uri || '',
+                mimeType: edgeData.mimeType || file.type || 'video/mp4',
+                geminiFile: uploadedFile,
+            };
         }
 
         function getSourceLabel() {
