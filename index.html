@@ -2429,6 +2429,43 @@
             }
         }
 
+        async function uploadVideoViaBackendProxy(file) {
+            if (!file) throw new Error(t('chooseVideoFirst'));
+            const uploadUrl = getBackendEndpointUrl('/api/upload-video');
+            if (!uploadUrl) throw new Error(t('backendRequired'));
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+            try {
+                const response = await fetch(uploadUrl, {
+                    method: 'POST',
+                    headers: {
+                        'x-mime-type': file.type || 'video/mp4',
+                        'x-file-size': String(file.size || 0),
+                        'x-file-name': file.name || 'video.mp4'
+                    },
+                    body: file,
+                    signal: controller.signal
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data?.error || `Upload failed: ${response.status}`);
+                }
+                const fileUri = data?.file?.uri || '';
+                const mimeType = data?.mimeType || file.type || 'video/mp4';
+                if (!fileUri) {
+                    throw new Error('Upload to Gemini failed — no file URI.');
+                }
+                return { fileUri, mimeType };
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    throw new Error(t('analysisTimeout'));
+                }
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
         function getSourceLabel() {
             if (state.currentSourceType === 'video-file') {
                 return state.selectedVideoFile ? `${t('videoFile')} · ${state.selectedVideoFile.name}` : t('videoFile');
@@ -3615,13 +3652,33 @@
                 if (shouldUseDirectBackendUpload(state.selectedVideoFile)) {
                     formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
                 } else {
-                    let videoBlobUrl = state.uploadedVideoBlobUrl;
-                    if (!videoBlobUrl) {
-                        const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                        videoBlobUrl = uploaded.url;
-                        state.uploadedVideoBlobUrl = videoBlobUrl;
+                    let fileUri = state.uploadedFileUri;
+                    let fileMimeType = state.uploadedFileMimeType;
+                    if (!fileUri) {
+                        try {
+                            const uploaded = await uploadVideoViaBackendProxy(state.selectedVideoFile);
+                            fileUri = uploaded.fileUri;
+                            fileMimeType = uploaded.mimeType;
+                            state.uploadedFileUri = fileUri;
+                            state.uploadedFileMimeType = fileMimeType;
+                        } catch (proxyError) {
+                            let videoBlobUrl = state.uploadedVideoBlobUrl;
+                            if (!videoBlobUrl && state.backendHealth?.blobConfigured) {
+                                const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
+                                videoBlobUrl = uploaded.url;
+                                state.uploadedVideoBlobUrl = videoBlobUrl;
+                            }
+                            if (videoBlobUrl) {
+                                formData.append('videoBlobUrl', videoBlobUrl);
+                            } else {
+                                throw proxyError;
+                            }
+                        }
                     }
-                    formData.append('videoBlobUrl', videoBlobUrl);
+                    if (fileUri) {
+                        formData.append('fileUri', fileUri);
+                        formData.append('fileMimeType', fileMimeType || 'video/mp4');
+                    }
                 }
             }
             if (state.currentSourceType === 'video-url') {
