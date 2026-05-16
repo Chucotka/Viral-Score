@@ -2413,12 +2413,12 @@
                     }
                 };
                 xhr.onload = () => {
-                    console.log('[blob POST] status:', xhr.status, xhr.responseText.substring(0, 300));
+                    console.log('[blob POST] status:', xhr.status, xhr.responseText.substring(0, 500));
                     try {
                         const data = JSON.parse(xhr.responseText);
                         if (xhr.status >= 200 && xhr.status < 300 && data.url) resolve(data);
                         else reject(new Error(data.error?.message || data.error || t('blobUploadFailed') + ': ' + xhr.status));
-                    } catch { reject(new Error(t('blobUploadFailed'))); }
+                    } catch { reject(new Error('Parse error: ' + xhr.status + ' ' + xhr.responseText.substring(0, 200))); }
                 };
                 xhr.onerror = () => reject(new Error(t('blobUploadFailed')));
                 xhr.ontimeout = () => reject(new Error(t('blobUploadFailed') + ': timeout'));
