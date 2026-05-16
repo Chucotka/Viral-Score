@@ -2,14 +2,25 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/**/*.js": {
-      "maxDuration": 300,
-      "memory": 1024
+      "maxDuration": 300
     }
   },
   "rewrites": [
-    { "source": "/health", "destination": "/api/health" },
-    { "source": "/privacy", "destination": "/privacy.html" },
-    { "source": "/api/upload-edge", "destination": "/api/upload-edge" },
-    { "source": "/api/(.*)", "destination": "/api/[...path]" }
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/api/upload-edge",
+      "destination": "/api/upload-edge"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/[...path]"
+    }
   ]
 }
