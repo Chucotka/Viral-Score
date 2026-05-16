@@ -27,6 +27,7 @@ export default async function handler(req, res) {
       },
       allowedContentTypes: [mimeType, 'video/mp4', 'video/quicktime', 'video/webm'],
       addRandomSuffix: false,
+      allowOverwrite: true,
     });
     return res.status(200).json({ clientToken, pathname: fileName });
   } catch (e) {
