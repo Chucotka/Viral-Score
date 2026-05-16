@@ -2398,25 +2398,48 @@
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
 
-            // Step 1: client-side upload to Vercel Blob (no Vercel function body limit)
             const blobUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
 
-            const { upload } = await import('https://esm.sh/@vercel/blob@1?bundle-deps');
-
-            const blob = await upload(file.name || 'video.mp4', file, {
-                access: 'public',
-                handleUploadUrl: blobUploadUrl,
-                clientPayload: JSON.stringify({ mimeType: file.type || 'video/mp4' }),
-                onUploadProgress: ({ percentage }) => {
-                    if (onProgress) onProgress(Math.round(percentage * 0.85));
-                },
+            // Step 1: get client token from our server
+            const tokenRes = await fetch(blobUploadUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    type: 'blob.generate-client-token',
+                    payload: {
+                        pathname: file.name || 'video.mp4',
+                        callbackUrl: blobUploadUrl,
+                        multipart: false,
+                        clientPayload: null,
+                    }
+                }),
             });
+            const tokenData = await tokenRes.json().catch(() => ({}));
+            if (!tokenRes.ok || !tokenData.clientToken) {
+                throw new Error(tokenData.error || t('blobUploadFailed'));
+            }
+            if (onProgress) onProgress(5);
 
-            if (!blob?.url) throw new Error(t('blobUploadFailed'));
-            if (onProgress) onProgress(90);
+            // Step 2: PUT file directly to Vercel Blob CDN (bypasses Vercel function size limit)
+            const putRes = await fetch(tokenData.url, {
+                method: 'PUT',
+                headers: {
+                    'authorization': `Bearer ${tokenData.clientToken}`,
+                    'x-content-type': file.type || 'video/mp4',
+                },
+                body: file,
+            });
+            if (!putRes.ok) {
+                const errText = await putRes.text().catch(() => '');
+                throw new Error(t('blobUploadFailed') + ': ' + putRes.status + ' ' + errText);
+            }
+            const blobData = await putRes.json().catch(() => ({}));
+            const blobUrl = blobData.url;
+            if (!blobUrl) throw new Error(t('blobUploadFailed') + ': no URL returned');
+            if (onProgress) onProgress(80);
 
-            // Step 2: backend pulls from Blob and pushes to Gemini
+            // Step 3: backend downloads from Blob URL and pushes to Gemini
             const edgeUrl = getBackendEndpointUrl('/api/upload-edge');
             if (!edgeUrl) throw new Error(t('blobNotConfigured'));
 
@@ -2424,12 +2447,11 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    blobUrl: blob.url,
+                    blobUrl,
                     mimeType: file.type || 'video/mp4',
                     fileName: file.name || 'video.mp4',
                 }),
             });
-
             if (onProgress) onProgress(99);
             const edgeData = await edgeRes.json().catch(() => ({}));
             if (!edgeRes.ok) throw new Error(edgeData.error || t('blobUploadFailed'));
