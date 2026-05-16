@@ -2413,6 +2413,7 @@
                     }
                 };
                 xhr.onload = () => {
+                    console.log('[blob/token] status:', xhr.status, 'response:', xhr.responseText.substring(0, 500));
                     try {
                         const data = JSON.parse(xhr.responseText);
                         if (xhr.status >= 200 && xhr.status < 300 && data.url) {
@@ -2420,7 +2421,7 @@
                         } else {
                             reject(new Error(data.error || t('blobUploadFailed') + ': ' + xhr.status));
                         }
-                    } catch { reject(new Error(t('blobUploadFailed'))); }
+                    } catch { reject(new Error(t('blobUploadFailed') + ': parse error')); }
                 };
                 xhr.onerror = () => reject(new Error(t('blobUploadFailed')));
                 xhr.ontimeout = () => reject(new Error(t('blobUploadFailed') + ': timeout'));
