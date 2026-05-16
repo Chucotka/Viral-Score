@@ -1,58 +1,44 @@
-import { Readable } from 'node:stream';
-import { handleUpload } from '@vercel/blob/client';
+// Server-side blob upload — browser sends file here, server puts it to Vercel Blob
+// Bypasses CORS/Telegram WebView restrictions on direct blob.vercel-storage.com access
+import { put } from '@vercel/blob';
 
-const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
-
-function sendJson(res, statusCode, payload) {
-  res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.end(JSON.stringify(payload));
-}
+export const config = {
+  runtime: 'nodejs',
+  maxDuration: 120,
+  api: {
+    bodyParser: false,
+    responseLimit: false,
+  },
+};
 
 export default async function handler(req, res) {
-  if (req.method === 'OPTIONS') {
-    res.statusCode = 204;
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    return res.end();
-  }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-File-Name,X-Mime-Type');
+
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
+
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return res.status(500).json({ error: 'BLOB_READ_WRITE_TOKEN not configured' });
+
+  const fileName = (req.headers['x-file-name'] || 'video.mp4').replace(/[^a-zA-Z0-9._-]/g, '_');
+  const mimeType = req.headers['x-mime-type'] || req.headers['content-type'] || 'video/mp4';
 
   try {
-    if (!BLOB_READ_WRITE_TOKEN) {
-      return sendJson(res, 500, { error: 'BLOB_READ_WRITE_TOKEN is not configured on the server.' });
-    }
-    // Use real public host — handleUpload embeds this in the callback URL
-    // that Vercel Blob calls after upload. Using 'localhost' breaks the callback.
-    const host = req.headers['x-forwarded-host'] || req.headers.host || '';
-    const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
-    const baseUrl = host ? `${proto}://${host}` : 'https://viral-score.vercel.app';
-    const url = new URL(req.url || '/api/blob/upload', baseUrl);
-    const request = new Request(url.toString(), {
-      method: req.method,
-      headers: req.headers,
-      body: Readable.toWeb(req),
-      duplex: 'half'
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+
+    const blob = await put(fileName, buffer, {
+      access: 'public',
+      token,
+      contentType: mimeType,
+      addRandomSuffix: false,
     });
-    const body = await request.json();
-    const jsonResponse = await handleUpload({
-      body,
-      request,
-      onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'application/octet-stream'],
-        addRandomSuffix: true
-      }),
-      onUploadCompleted: async ({ blob }) => {
-        // No-op: callback is best-effort, do not block the upload on errors here
-        try { console.log('Blob upload completed:', blob?.url || ''); } catch {}
-      }
-    });
-    return sendJson(res, 200, jsonResponse);
-  } catch (error) {
-    console.error('Blob upload error:', error?.message);
-    return sendJson(res, 400, { error: error?.message || 'Blob upload failed.' });
+
+    return res.status(200).json({ url: blob.url });
+  } catch (e) {
+    return res.status(500).json({ error: e?.message || 'Upload failed' });
   }
 }

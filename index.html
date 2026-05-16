@@ -2398,27 +2398,14 @@
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
 
-            const blobUploadUrl = getBackendEndpointUrl('/api/blob/token');
-            if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
-
-            // Step 1: get client upload token from server (tiny JSON request, no file body)
-            const tokenRes = await fetch(blobUploadUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ fileName: file.name || 'video.mp4', mimeType: file.type || 'video/mp4' }),
-            });
-            const tokenData = await tokenRes.json().catch(() => ({}));
-            if (!tokenRes.ok || !tokenData.clientToken) {
-                throw new Error(tokenData.error || t('blobUploadFailed'));
-            }
-            if (onProgress) onProgress(5);
-
-            // Step 2: PUT file DIRECTLY to Vercel Blob CDN (bypasses Vercel function entirely!)
+            // POST file to our server endpoint (avoids direct blob.vercel-storage.com CORS in Telegram)
+            const blobUploadServerUrl = getBackendEndpointUrl('/api/blob/upload');
+            if (!blobUploadServerUrl) throw new Error(t('blobNotConfigured'));
             const blobResult = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
-                xhr.open('PUT', `https://blob.vercel-storage.com/${encodeURIComponent(file.name || 'video.mp4')}`);
-                xhr.setRequestHeader('authorization', `Bearer ${tokenData.clientToken}`);
-                xhr.setRequestHeader('x-content-type', file.type || 'video/mp4');
+                xhr.open('POST', blobUploadServerUrl);
+                xhr.setRequestHeader('x-file-name', file.name || 'video.mp4');
+                xhr.setRequestHeader('x-mime-type', file.type || 'video/mp4');
 
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable && onProgress) {
@@ -2426,7 +2413,7 @@
                     }
                 };
                 xhr.onload = () => {
-                    console.log('[blob PUT] status:', xhr.status, xhr.responseText.substring(0, 300));
+                    console.log('[blob POST] status:', xhr.status, xhr.responseText.substring(0, 300));
                     try {
                         const data = JSON.parse(xhr.responseText);
                         if (xhr.status >= 200 && xhr.status < 300 && data.url) resolve(data);
