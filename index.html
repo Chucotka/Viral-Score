@@ -2431,28 +2431,46 @@
 
         async function uploadVideoViaGeminiSession(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            const uploadUrl = getBackendEndpointUrl('/api/upload-video');
-            if (!uploadUrl) throw new Error(t('backendRequired'));
+            const backendBase = state.backendUrl ? state.backendUrl.replace(/\/api\/.*$/, '') : '';
+            const sessionUrl = backendBase ? `${backendBase}/api/upload-session` : getBackendEndpointUrl('/api/upload-session');
+            if (!sessionUrl) throw new Error(t('backendRequired'));
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
             try {
-                const response = await fetch(uploadUrl, {
+                const sessionRes = await fetch(sessionUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mimeType: file.type || 'video/mp4',
+                        fileSize: file.size || 0,
+                        fileName: file.name || 'video.mp4'
+                    }),
+                    signal: controller.signal
+                });
+                const sessionData = await sessionRes.json().catch(() => ({}));
+                if (!sessionRes.ok) {
+                    throw new Error(sessionData?.error || `Upload session failed: ${sessionRes.status}`);
+                }
+                const uploadUrl = sessionData?.uploadUrl || '';
+                const mimeType = sessionData?.mimeType || file.type || 'video/mp4';
+                if (!uploadUrl) {
+                    throw new Error('Gemini did not return an upload URL.');
+                }
+                const uploadRes = await fetch(uploadUrl, {
                     method: 'POST',
                     headers: {
-                        'x-mime-type': file.type || 'video/mp4',
-                        'x-file-size': String(file.size || 0),
-                        'x-file-name': file.name || 'video.mp4'
+                        'X-Goog-Upload-Offset': '0',
+                        'X-Goog-Upload-Command': 'upload, finalize'
                     },
                     body: file,
                     signal: controller.signal
                 });
-                const uploadData = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(uploadData?.error || `Upload failed: ${response.status}`);
+                const uploadData = await uploadRes.json().catch(() => ({}));
+                if (!uploadRes.ok) {
+                    throw new Error(uploadData?.error || `Direct Gemini upload failed: ${uploadRes.status}`);
                 }
                 const uploadedFile = uploadData?.file || uploadData;
                 const fileUri = uploadedFile?.uri || '';
-                const mimeType = uploadData?.mimeType || file.type || 'video/mp4';
                 if (!fileUri) {
                     throw new Error('Upload to Gemini failed — no file URI.');
                 }
