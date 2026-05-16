@@ -1,9 +1,9 @@
-// Node.js runtime — disable default body size limit for large video uploads
+// Node.js runtime — receives a Vercel Blob URL, downloads it, pushes to Gemini
 export const config = {
   runtime: 'nodejs',
   maxDuration: 300,
   api: {
-    bodyParser: false,
+    bodyParser: { sizeLimit: '8mb' },
     responseLimit: false,
   },
 };
@@ -15,26 +15,30 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Mime-Type,X-File-Size,X-File-Name');
 
-  if (req.method === 'OPTIONS') {
-    return res.status(204).end();
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST required' });
+  if (!GEMINI_API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
+
+  const body = req.body || {};
+  const blobUrl = body.blobUrl;
+  const mimeType = body.mimeType || 'video/mp4';
+  const fileName = (body.fileName || 'video.mp4').slice(0, 200);
+
+  if (!blobUrl) {
+    return res.status(400).json({ error: 'blobUrl is required' });
   }
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'POST required' });
+  // Download from Vercel Blob
+  let buffer;
+  try {
+    const blobRes = await fetch(blobUrl);
+    if (!blobRes.ok) throw new Error(`Blob fetch failed: ${blobRes.status}`);
+    const ab = await blobRes.arrayBuffer();
+    buffer = Buffer.from(ab);
+  } catch (e) {
+    return res.status(502).json({ error: `Could not download blob: ${e.message}` });
   }
 
-  if (!GEMINI_API_KEY) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' });
-  }
-
-  const mimeType = req.headers['x-mime-type'] || req.headers['content-type'] || 'video/mp4';
-  const fileSize = req.headers['x-file-size'] || '0';
-  const fileName = (req.headers['x-file-name'] || 'video.mp4').slice(0, 200);
-
-  // Buffer the entire body (bodyParser is disabled — we read raw stream)
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const buffer = Buffer.concat(chunks);
   const actualSize = String(buffer.length);
 
   // Step 1: start resumable upload session with Gemini
@@ -60,9 +64,7 @@ export default async function handler(req, res) {
   }
 
   const uploadUrl = startRes.headers.get('x-goog-upload-url');
-  if (!uploadUrl) {
-    return res.status(502).json({ error: 'No upload URL from Gemini' });
-  }
+  if (!uploadUrl) return res.status(502).json({ error: 'No upload URL from Gemini' });
 
   // Step 2: upload buffer to Gemini
   const uploadRes = await fetch(uploadUrl, {
