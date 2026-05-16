@@ -2401,27 +2401,37 @@
             const blobUploadUrl = getBackendEndpointUrl('/api/blob/token');
             if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
 
-            // Step 1: stream file directly to /api/blob/token → Vercel Blob
+            // Step 1: get client upload token from server (tiny JSON request, no file body)
+            const tokenRes = await fetch(blobUploadUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileName: file.name || 'video.mp4', mimeType: file.type || 'video/mp4' }),
+            });
+            const tokenData = await tokenRes.json().catch(() => ({}));
+            if (!tokenRes.ok || !tokenData.clientToken) {
+                throw new Error(tokenData.error || t('blobUploadFailed'));
+            }
+            if (onProgress) onProgress(5);
+
+            // Step 2: PUT file DIRECTLY to Vercel Blob CDN (bypasses Vercel function entirely!)
             const blobResult = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
-                xhr.open('POST', blobUploadUrl);
-                xhr.setRequestHeader('x-mime-type', file.type || 'video/mp4');
-                xhr.setRequestHeader('x-file-name', file.name || 'video.mp4');
+                xhr.open('PUT', `https://blob.vercel-storage.com/${encodeURIComponent(file.name || 'video.mp4')}`);
+                xhr.setRequestHeader('authorization', `Bearer ${tokenData.clientToken}`);
+                xhr.setRequestHeader('x-content-type', file.type || 'video/mp4');
+                xhr.setRequestHeader('x-add-random-suffix', '1');
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable && onProgress) {
-                        onProgress(Math.round((e.loaded / e.total) * 75));
+                        onProgress(5 + Math.round((e.loaded / e.total) * 70));
                     }
                 };
                 xhr.onload = () => {
-                    console.log('[blob/token] status:', xhr.status, 'response:', xhr.responseText.substring(0, 500));
+                    console.log('[blob PUT] status:', xhr.status, xhr.responseText.substring(0, 300));
                     try {
                         const data = JSON.parse(xhr.responseText);
-                        if (xhr.status >= 200 && xhr.status < 300 && data.url) {
-                            resolve(data);
-                        } else {
-                            reject(new Error(data.error || t('blobUploadFailed') + ': ' + xhr.status));
-                        }
-                    } catch { reject(new Error(t('blobUploadFailed') + ': parse error')); }
+                        if (xhr.status >= 200 && xhr.status < 300 && data.url) resolve(data);
+                        else reject(new Error(data.error?.message || data.error || t('blobUploadFailed') + ': ' + xhr.status));
+                    } catch { reject(new Error(t('blobUploadFailed'))); }
                 };
                 xhr.onerror = () => reject(new Error(t('blobUploadFailed')));
                 xhr.ontimeout = () => reject(new Error(t('blobUploadFailed') + ': timeout'));
