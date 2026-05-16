@@ -3662,19 +3662,9 @@
                 if (shouldUseDirectBackendUpload(state.selectedVideoFile)) {
                     formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
                 } else {
-                    let fileUri = state.uploadedFileUri;
-                    let fileMimeType = state.uploadedFileMimeType;
-                    if (!fileUri) {
-                        const uploaded = await uploadVideoViaBackendProxy(state.selectedVideoFile);
-                        fileUri = uploaded.fileUri;
-                        fileMimeType = uploaded.mimeType;
-                        state.uploadedFileUri = fileUri;
-                        state.uploadedFileMimeType = fileMimeType;
-                    }
-                    if (fileUri) {
-                        formData.append('fileUri', fileUri);
-                        formData.append('fileMimeType', fileMimeType || 'video/mp4');
-                    }
+                    const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
+                    formData.append('videoBlobUrl', uploaded.url);
+                    formData.append('fileMimeType', uploaded.contentType || state.selectedVideoFile.type || 'video/mp4');
                 }
             }
             if (state.currentSourceType === 'video-url') {
