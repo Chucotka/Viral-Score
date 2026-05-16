@@ -2502,7 +2502,7 @@
             return state.lang === 'ru' ? 'Текст / транскрипт' : 'Text / transcript';
         }
 
-        function getPromptBase() {
+        function getPromptBase(mode = state.currentMode) {
             const russian = state.lang === 'ru';
             const modeGuides = russian ? {
                 quick: 'Дай короткую, понятную оценку для автора с практичными правками.',
@@ -2526,7 +2526,7 @@
                 russian
                     ? `Ты senior-стратег коротких видео для ${state.currentPlatform}. Отвечай на русском языке.`
                     : `You are a senior short-form content strategist for ${state.currentPlatform}.`,
-                modeGuides[state.currentMode] || modeGuides.pro,
+                modeGuides[mode] || modeGuides.pro,
                 sourceGuides[state.currentSourceType] || sourceGuides.text,
                 russian
                     ? 'Верни только валидный JSON по заданной схеме. Все оценки должны быть целыми числами от 0 до 100.'
@@ -2540,10 +2540,10 @@
             ].join(' ');
         }
 
-        function buildAnalysisPayload(extraText = '') {
+        function buildAnalysisPayload(extraText = '', mode = state.currentMode) {
             const context = contextInput.value.trim();
             const prompt = [
-                getPromptBase(),
+                getPromptBase(mode),
                 extraText ? extraText.trim() : '',
                 context ? `${state.lang === 'ru' ? 'Дополнительный контекст' : 'Extra context'}:\n${context}` : ''
             ].filter(Boolean).join('\n\n');
@@ -3678,7 +3678,7 @@
             formData.append('sourceType', state.currentSourceType);
             formData.append('language', state.lang);
             formData.append('context', contextInput.value.trim());
-            formData.append('prompt', buildAnalysisPayload());
+            formData.append('prompt', buildAnalysisPayload('', effectiveMode));
             formData.append('freeLimit', String(state.freeLimit));
             formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
@@ -3802,11 +3802,11 @@
             }
 
             clearFieldErrors();
-            let prompt = buildAnalysisPayload();
             const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
             const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > 10 * 1024 * 1024
                 ? 'quick'
                 : state.currentMode;
+            let prompt = buildAnalysisPayload('', effectiveMode);
 
             if (state.currentSourceType === 'video-file' && !state.selectedVideoFile) {
                 mainError.textContent = t('chooseVideoFirst');
