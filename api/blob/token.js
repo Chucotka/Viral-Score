@@ -29,6 +29,7 @@ export default async function handler(req, res) {
         'content-length': fileSize,
         'x-add-random-suffix': '1',
         'x-cache-control-max-age': '3600',
+        'x-access': 'private',
       },
       body: req,
       duplex: 'half',
@@ -39,5 +40,10 @@ export default async function handler(req, res) {
   let data;
   try { data = JSON.parse(text); } catch { data = { raw: text }; }
   if (!apiRes.ok) return res.status(502).json({ error: data.error?.message || text.substring(0, 300) });
-  return res.status(200).json({ url: data.url });
+
+  // For private blobs we need a download URL — generate it via API
+  const blobUrl = data.url || data.downloadUrl;
+  if (!blobUrl) return res.status(502).json({ error: 'No URL in Blob response', raw: text.substring(0, 300) });
+
+  return res.status(200).json({ url: blobUrl });
 }
