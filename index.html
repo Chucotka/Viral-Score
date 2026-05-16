@@ -2419,7 +2419,7 @@
             if (!file) throw new Error(t('chooseVideoFirst'));
             const tokenEndpoint = getBackendEndpointUrl('/api/blob/client-token');
             if (!tokenEndpoint) throw new Error(t('blobNotConfigured'));
-            const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
+            const { put } = await import('https://esm.sh/@vercel/blob@0.27.1');
             try {
                 const tokenResponse = await fetch(tokenEndpoint, {
                     method: 'POST',
@@ -2434,7 +2434,7 @@
                     throw new Error(tokenData?.error || t('blobNotConfigured'));
                 }
                 const result = await Promise.race([
-                    upload(file.name, file, {
+                    put(file.name, file, {
                         access: 'public',
                         token: tokenData.clientToken,
                         multipart: true,
