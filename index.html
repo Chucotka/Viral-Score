@@ -2401,37 +2401,35 @@
             const blobUploadUrl = getBackendEndpointUrl('/api/blob/token');
             if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
 
-            // Step 1: get client token from our server
-            const tokenRes = await fetch(blobUploadUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fileName: file.name || 'video.mp4',
-                    mimeType: file.type || 'video/mp4',
-                }),
+            // Step 1: stream file directly to /api/blob/token → Vercel Blob
+            const blobResult = await new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', blobUploadUrl);
+                xhr.setRequestHeader('x-mime-type', file.type || 'video/mp4');
+                xhr.setRequestHeader('x-file-name', file.name || 'video.mp4');
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable && onProgress) {
+                        onProgress(Math.round((e.loaded / e.total) * 75));
+                    }
+                };
+                xhr.onload = () => {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        if (xhr.status >= 200 && xhr.status < 300 && data.url) {
+                            resolve(data);
+                        } else {
+                            reject(new Error(data.error || t('blobUploadFailed') + ': ' + xhr.status));
+                        }
+                    } catch { reject(new Error(t('blobUploadFailed'))); }
+                };
+                xhr.onerror = () => reject(new Error(t('blobUploadFailed')));
+                xhr.ontimeout = () => reject(new Error(t('blobUploadFailed') + ': timeout'));
+                xhr.timeout = 600000;
+                xhr.send(file);
             });
-            const tokenData = await tokenRes.json().catch(() => ({}));
-            if (!tokenRes.ok || !tokenData.uploadUrl) {
-                throw new Error(tokenData.error || t('blobUploadFailed'));
-            }
-            if (onProgress) onProgress(5);
-
-            // Step 2: PUT file directly to Vercel Blob CDN using signed URL
-            const putRes = await fetch(tokenData.uploadUrl, {
-                method: 'PUT',
-                headers: { 'content-type': file.type || 'video/mp4' },
-                body: file,
-            });
-            if (!putRes.ok) {
-                const errText = await putRes.text().catch(() => '');
-                throw new Error(t('blobUploadFailed') + ': ' + putRes.status + ' ' + errText);
-            }
-            const blobData = await putRes.json().catch(() => ({}));
-            const blobUrl = blobData.url || tokenData.url;
-            if (!blobUrl) throw new Error(t('blobUploadFailed') + ': no URL returned');
             if (onProgress) onProgress(80);
 
-            // Step 3: backend downloads from Blob URL and pushes to Gemini
+            // Step 2: backend downloads from Blob URL and pushes to Gemini
             const edgeUrl = getBackendEndpointUrl('/api/upload-edge');
             if (!edgeUrl) throw new Error(t('blobNotConfigured'));
 
@@ -2439,7 +2437,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    blobUrl,
+                    blobUrl: blobResult.url,
                     mimeType: file.type || 'video/mp4',
                     fileName: file.name || 'video.mp4',
                 }),
