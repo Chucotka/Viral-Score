@@ -2620,19 +2620,33 @@
             if (!file) return;
             state.selectedVideoFile = file;
             state.uploadedVideoBlobUrl = '';
+            state.uploadedFileUri = '';
+            state.uploadedFileMimeType = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
             if (state.backendUrl && !shouldUseDirectBackendUpload(file)) {
                 state.videoBlobCacheKey = cacheKey;
-                state.blobUploadPromise = uploadVideoToBlob(file)
+                const backendBase = state.backendUrl.replace(/\/api\/.*$/, '');
+                state.blobUploadPromise = fetch(`${backendBase}/api/upload-video`, {
+                    method: 'POST',
+                    headers: {
+                        'x-mime-type': file.type || 'video/mp4',
+                        'x-file-size': String(file.size),
+                        'x-file-name': file.name
+                    },
+                    body: file
+                })
+                    .then(r => r.ok ? r.json() : r.json().then(e => { throw new Error(e.error || 'Upload failed'); }))
                     .then(result => {
                         if (state.videoBlobCacheKey === cacheKey) {
-                            state.uploadedVideoBlobUrl = result.url;
+                            state.uploadedFileUri = result.file?.uri || '';
+                            state.uploadedFileMimeType = result.mimeType || file.type || 'video/mp4';
                         }
                         state.blobUploadPromise = null;
                     })
-                    .catch(() => {
+                    .catch(err => {
+                        console.error('Pre-upload failed:', err);
                         state.blobUploadPromise = null;
                     });
             }
@@ -3621,13 +3635,27 @@
                             // Prefetch may fail (e.g. offline); fall through to explicit upload.
                         }
                     }
-                    let videoBlobUrl = state.uploadedVideoBlobUrl;
-                    if (!videoBlobUrl) {
-                        const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
-                        videoBlobUrl = uploaded.url;
-                        state.uploadedVideoBlobUrl = videoBlobUrl;
+                    let fileUri = state.uploadedFileUri;
+                    if (!fileUri) {
+                        const backendBase = state.backendUrl.replace(/\/api\/.*$/, '');
+                        const r = await fetch(`${backendBase}/api/upload-video`, {
+                            method: 'POST',
+                            headers: {
+                                'x-mime-type': state.selectedVideoFile.type || 'video/mp4',
+                                'x-file-size': String(state.selectedVideoFile.size),
+                                'x-file-name': state.selectedVideoFile.name
+                            },
+                            body: state.selectedVideoFile
+                        });
+                        if (!r.ok) throw new Error((await r.json().catch(()=>({}))).error || 'Upload failed');
+                        const uploadResult = await r.json();
+                        fileUri = uploadResult.file?.uri || '';
+                        state.uploadedFileUri = fileUri;
+                        state.uploadedFileMimeType = uploadResult.mimeType || state.selectedVideoFile.type || 'video/mp4';
                     }
-                    formData.append('videoBlobUrl', videoBlobUrl);
+                    if (!fileUri) throw new Error('Upload to Gemini failed — no file URI.');
+                    formData.append('fileUri', fileUri);
+                    formData.append('fileMimeType', state.uploadedFileMimeType || 'video/mp4');
                 }
             }
             if (state.currentSourceType === 'video-url') {
