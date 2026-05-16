@@ -852,7 +852,8 @@ async function handleBlobClientUpload(req, url) {
     request,
     onBeforeGenerateToken: async () => ({
       allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'application/octet-stream'],
-      addRandomSuffix: true
+      addRandomSuffix: true,
+      callbackUrl: `${url.origin}/api/blob/upload`
     }),
     onUploadCompleted: async ({ blob }) => {
       try { console.log('Blob upload completed:', blob?.url || ''); } catch {}

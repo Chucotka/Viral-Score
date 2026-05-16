@@ -2436,9 +2436,6 @@
                 return result;
             } catch (error) {
                 const message = String(error?.message || '');
-                if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
-                    throw new Error(t('blobNotConfigured'));
-                }
                 throw new Error(message || t('blobUploadFailed'));
             }
         }
