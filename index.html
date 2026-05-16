@@ -2066,6 +2066,12 @@
             removeItem(key) { try { safeStorage.removeItem(key); } catch {} }
         };
 
+        const safeStorage = {
+            getItem(key) { try { return safeStorage.getItem(key); } catch { return null; } },
+            setItem(key, value) { try { safeStorage.setItem(key, value); } catch {} },
+            removeItem(key) { try { safeStorage.removeItem(key); } catch {} }
+        };
+
         const state = {
             apiKey: safeStorage.getItem(STORAGE_KEYS.apiKey) || '',
             backendUrl: safeStorage.getItem(STORAGE_KEYS.backendUrl) || DEFAULT_BACKEND_URL,
@@ -3360,7 +3366,21 @@
             el.style.animation = '';
         }
 
+        function restartAnimation(el) {
+            if (!el) return;
+            el.style.animation = 'none';
+            void el.offsetWidth;
+            el.style.animation = '';
+        }
+
         function renderResults(data, meta = state.lastAnalysisMeta || {}) {
+            [
+                document.getElementById('analysis-summary-card'),
+                document.querySelector('.suggestions'),
+                document.querySelector('.improved-version'),
+                document.querySelector('.action-buttons'),
+                document.getElementById('compare-card')
+            ].forEach(restartAnimation);
             [
                 document.getElementById('analysis-summary-card'),
                 document.querySelector('.suggestions'),
