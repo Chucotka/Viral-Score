@@ -15,10 +15,6 @@
       "destination": "/privacy.html"
     },
     {
-      "source": "/api/upload-edge",
-      "destination": "/api/upload-edge"
-    },
-    {
       "source": "/api/(.*)",
       "destination": "/api/[...path]"
     }
