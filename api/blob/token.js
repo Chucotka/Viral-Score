@@ -26,7 +26,7 @@ export default async function handler(req, res) {
         callbackUrl: `https://${req.headers.host}/api/blob/token`,
       },
       allowedContentTypes: [mimeType, 'video/mp4', 'video/quicktime', 'video/webm'],
-      addRandomSuffix: true,
+      addRandomSuffix: false,
     });
     return res.status(200).json({ clientToken, pathname: fileName });
   } catch (e) {
