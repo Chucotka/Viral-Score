@@ -1,5 +1,12 @@
-// Node.js runtime — no 4.5 MB Edge body limit
-export const config = { runtime: 'nodejs', maxDuration: 300 };
+// Node.js runtime — disable default body size limit for large video uploads
+export const config = {
+  runtime: 'nodejs',
+  maxDuration: 300,
+  api: {
+    bodyParser: false,
+    responseLimit: false,
+  },
+};
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
@@ -24,7 +31,7 @@ export default async function handler(req, res) {
   const fileSize = req.headers['x-file-size'] || '0';
   const fileName = (req.headers['x-file-name'] || 'video.mp4').slice(0, 200);
 
-  // Buffer the entire body
+  // Buffer the entire body (bodyParser is disabled — we read raw stream)
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   const buffer = Buffer.concat(chunks);
