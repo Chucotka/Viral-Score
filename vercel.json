@@ -3,6 +3,10 @@
   "functions": {
     "api/**/*.js": {
       "maxDuration": 300
+    },
+    "api/upload-edge.js": {
+      "maxDuration": 300,
+      "memory": 1024
     }
   },
   "rewrites": [
