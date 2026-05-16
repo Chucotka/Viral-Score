@@ -1795,6 +1795,7 @@
                 pasteTextFirst: 'Paste your caption, transcript, or script first.',
                 localFileBlocked: 'Video upload is blocked from a local file page. Open the app from HTTPS/Telegram hosting, or test with a public YouTube link.',
                 analysisFailed: 'Analysis failed. Check the input and your API key, then try again.',
+                analysisTimeout: 'The analysis took too long. Try a shorter video, Quick mode, or run it again.',
                 retryAnalysis: 'Retry analysis',
                 restoreDraft: 'Restore draft',
                 incompleteJson: 'Gemini returned incomplete JSON. Try again, or use Quick mode for a shorter analysis.',
@@ -1965,6 +1966,7 @@
                 pasteTextFirst: 'Сначала вставь caption, транскрипт или сценарий.',
                 localFileBlocked: 'Загрузка видео заблокирована со страницы file://. Открой приложение через HTTPS/Telegram hosting или протестируй публичную YouTube-ссылку.',
                 analysisFailed: 'Анализ не удался. Проверь входные данные и API key, затем попробуй снова.',
+                analysisTimeout: 'Анализ занял слишком много времени. Попробуй более короткое видео, режим «Быстро» или запусти анализ ещё раз.',
                 retryAnalysis: 'Повторить анализ',
                 restoreDraft: 'Восстановить черновик',
                 incompleteJson: 'Gemini вернул неполный JSON. Попробуй ещё раз или включи режим “Быстро”.',
@@ -1998,6 +2000,8 @@
         const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
+        const NETWORK_TIMEOUT_MS = 120000;
+        const ANALYSIS_TIMEOUT_MS = 240000;
         const ANALYSIS_SCHEMA = {
             type: 'object',
             properties: {
@@ -2094,6 +2098,8 @@
             selectedVideoFile: null,
             selectedVideoUrl: '',
             uploadedVideoBlobUrl: '',
+            uploadedFileUri: '',
+            uploadedFileMimeType: '',
             videoBlobCacheKey: '',
             blobUploadPromise: null,
             loadingInterval: null,
@@ -2401,10 +2407,15 @@
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
             const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
             try {
-                const result = await upload(file.name, file, {
-                    access: 'public',
-                    handleUploadUrl
-                });
+                const result = await Promise.race([
+                    upload(file.name, file, {
+                        access: 'public',
+                        handleUploadUrl
+                    }),
+                    new Promise((_, reject) => {
+                        setTimeout(() => reject(new Error(t('blobUploadFailed'))), NETWORK_TIMEOUT_MS);
+                    })
+                ]);
                 if (!result?.url) {
                     throw new Error(t('blobUploadFailed'));
                 }
@@ -2604,6 +2615,8 @@
         function clearVideoSelection() {
             state.selectedVideoFile = null;
             state.uploadedVideoBlobUrl = '';
+            state.uploadedFileUri = '';
+            state.uploadedFileMimeType = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
             if (state.selectedVideoObjectUrl) {
@@ -2624,47 +2637,6 @@
             state.uploadedFileMimeType = '';
             state.videoBlobCacheKey = '';
             state.blobUploadPromise = null;
-            const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
-            if (state.backendUrl && !shouldUseDirectBackendUpload(file)) {
-                state.videoBlobCacheKey = cacheKey;
-                const backendBase = state.backendUrl.replace(/\/api\/.*$/, '');
-                state.blobUploadPromise = (async () => {
-                    // Step 1: get resumable upload URL from server
-                    const sessionRes = await fetch(`${backendBase}/api/upload-session`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            mimeType: file.type || 'video/mp4',
-                            fileSize: file.size,
-                            fileName: file.name
-                        })
-                    });
-                    if (!sessionRes.ok) {
-                        const e = await sessionRes.json().catch(() => ({}));
-                        throw new Error(e.error || 'Upload session failed');
-                    }
-                    const { uploadUrl, mimeType } = await sessionRes.json();
-                    // Step 2: upload file directly from browser to Gemini
-                    const uploadRes = await fetch(uploadUrl, {
-                        method: 'POST',
-                        headers: {
-                            'X-Goog-Upload-Offset': '0',
-                            'X-Goog-Upload-Command': 'upload, finalize',
-                            'Content-Length': String(file.size)
-                        },
-                        body: file
-                    });
-                    if (!uploadRes.ok) throw new Error('Direct Gemini upload failed: ' + uploadRes.status);
-                    const uploadData = await uploadRes.json();
-                    const uploadedFile = uploadData.file || uploadData;
-                    if (state.videoBlobCacheKey === cacheKey) {
-                        state.uploadedFileUri = uploadedFile.uri || '';
-                        state.uploadedFileMimeType = mimeType || file.type || 'video/mp4';
-                    }
-                })()
-                    .catch(err => { console.error('Pre-upload failed:', err); })
-                    .finally(() => { state.blobUploadPromise = null; });
-            }
             if (state.selectedVideoObjectUrl) URL.revokeObjectURL(state.selectedVideoObjectUrl);
             state.selectedVideoObjectUrl = URL.createObjectURL(file);
             videoPreviewEl.src = state.selectedVideoObjectUrl;
@@ -3643,46 +3615,13 @@
                 if (shouldUseDirectBackendUpload(state.selectedVideoFile)) {
                     formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
                 } else {
-                    if (state.blobUploadPromise) {
-                        try {
-                            await state.blobUploadPromise;
-                        } catch {
-                            // Prefetch may fail (e.g. offline); fall through to explicit upload.
-                        }
+                    let videoBlobUrl = state.uploadedVideoBlobUrl;
+                    if (!videoBlobUrl) {
+                        const uploaded = await uploadVideoToBlob(state.selectedVideoFile);
+                        videoBlobUrl = uploaded.url;
+                        state.uploadedVideoBlobUrl = videoBlobUrl;
                     }
-                    let fileUri = state.uploadedFileUri;
-                    if (!fileUri) {
-                        const backendBase = state.backendUrl.replace(/\/api\/.*$/, '');
-                        const sessionRes = await fetch(`${backendBase}/api/upload-session`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                mimeType: state.selectedVideoFile.type || 'video/mp4',
-                                fileSize: state.selectedVideoFile.size,
-                                fileName: state.selectedVideoFile.name
-                            })
-                        });
-                        if (!sessionRes.ok) throw new Error((await sessionRes.json().catch(()=>({}))).error || 'Upload session failed');
-                        const { uploadUrl, mimeType } = await sessionRes.json();
-                        const uploadRes = await fetch(uploadUrl, {
-                            method: 'POST',
-                            headers: {
-                                'X-Goog-Upload-Offset': '0',
-                                'X-Goog-Upload-Command': 'upload, finalize',
-                                'Content-Length': String(state.selectedVideoFile.size)
-                            },
-                            body: state.selectedVideoFile
-                        });
-                        if (!uploadRes.ok) throw new Error('Direct Gemini upload failed: ' + uploadRes.status);
-                        const uploadData = await uploadRes.json();
-                        const uploadedFile = uploadData.file || uploadData;
-                        fileUri = uploadedFile.uri || '';
-                        state.uploadedFileUri = fileUri;
-                        state.uploadedFileMimeType = mimeType || state.selectedVideoFile.type || 'video/mp4';
-                    }
-                    if (!fileUri) throw new Error('Upload to Gemini failed — no file URI.');
-                    formData.append('fileUri', fileUri);
-                    formData.append('fileMimeType', state.uploadedFileMimeType || 'video/mp4');
+                    formData.append('videoBlobUrl', videoBlobUrl);
                 }
             }
             if (state.currentSourceType === 'video-url') {
@@ -3696,10 +3635,23 @@
                     : raw;
                 formData.append('text', body);
             }
-            const response = await fetch(state.backendUrl, {
-                method: 'POST',
-                body: formData
-            });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+            let response;
+            try {
+                response = await fetch(state.backendUrl, {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+            } catch (error) {
+                if (error?.name === 'AbortError') {
+                    throw new Error(t('analysisTimeout'));
+                }
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+            }
             if (!response.ok) {
                 if (response.status === 402) {
                     throw new Error(await getApiError(response, getPaywallMessage()));
