@@ -2414,9 +2414,6 @@
 
         async function uploadVideoToBlob(file) {
             if (!file) throw new Error(t('chooseVideoFirst'));
-            if (state.backendHealth && state.backendHealth.blobConfigured === false) {
-                throw new Error(t('blobNotConfigured'));
-            }
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
             const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
