@@ -1998,7 +1998,9 @@
         };
 
         const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
-        const DEFAULT_BACKEND_URL = window.location.protocol === 'file:' ? 'https://viral-score.vercel.app/api/analyze' : '/api/analyze';
+        const DEFAULT_BACKEND_URL = window.location.protocol === 'file:'
+            ? 'http://127.0.0.1:3000/api/analyze'
+            : '/api/analyze';
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         const NETWORK_TIMEOUT_MS = 120000;
         const ANALYSIS_TIMEOUT_MS = 240000;
@@ -2072,7 +2074,11 @@
 
         const state = {
             apiKey: safeStorage.getItem(STORAGE_KEYS.apiKey) || '',
-            backendUrl: safeStorage.getItem(STORAGE_KEYS.backendUrl) || DEFAULT_BACKEND_URL,
+            backendUrl: window.location.protocol === 'file:'
+                ? (safeStorage.getItem(STORAGE_KEYS.backendUrl) && isLocalBackendUrlValue(safeStorage.getItem(STORAGE_KEYS.backendUrl))
+                    ? safeStorage.getItem(STORAGE_KEYS.backendUrl)
+                    : DEFAULT_BACKEND_URL)
+                : (safeStorage.getItem(STORAGE_KEYS.backendUrl) || DEFAULT_BACKEND_URL),
             lang: safeStorage.getItem(STORAGE_KEYS.lang) || (navigator.language && navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'),
             billingMode: safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both',
             starsInvoiceUrl: safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '',
@@ -2801,10 +2807,9 @@
             return Boolean(state.backendUrl);
         }
 
-        function isLocalBackendUrl() {
-            if (!state.backendUrl) return false;
+        function isLocalBackendUrlValue(value) {
             try {
-                const url = new URL(state.backendUrl, window.location.href);
+                const url = new URL(value, window.location.href);
                 const host = url.hostname.toLowerCase();
                 return host === 'localhost'
                     || host === '127.0.0.1'
@@ -2814,6 +2819,10 @@
             } catch {
                 return false;
             }
+        }
+
+        function isLocalBackendUrl() {
+            return isLocalBackendUrlValue(state.backendUrl);
         }
 
         function shouldUseDirectBackendUpload(file) {
