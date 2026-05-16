@@ -3540,7 +3540,7 @@
                 while (Date.now() - started < 120000) {
                     if (delayMs) await sleep(delayMs);
                     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
-                    const pollRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(state.apiKey)}`);
+                    const pollRes = await fetch(getBackendEndpointUrl("/api/file-status"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName }) });
                     if (!pollRes.ok) continue;
                     const pollData = await pollRes.json();
                     fileState = pollData.state;
