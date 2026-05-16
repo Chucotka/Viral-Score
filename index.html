@@ -2398,7 +2398,7 @@
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
 
-            const blobUploadUrl = getBackendEndpointUrl('/api/blob/upload');
+            const blobUploadUrl = getBackendEndpointUrl('/api/blob/token');
             if (!blobUploadUrl) throw new Error(t('blobNotConfigured'));
 
             // Step 1: get client token from our server
@@ -2406,28 +2406,20 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    type: 'blob.generate-client-token',
-                    payload: {
-                        pathname: file.name || 'video.mp4',
-                        callbackUrl: blobUploadUrl,
-                        multipart: false,
-                        clientPayload: null,
-                    }
+                    fileName: file.name || 'video.mp4',
+                    mimeType: file.type || 'video/mp4',
                 }),
             });
             const tokenData = await tokenRes.json().catch(() => ({}));
-            if (!tokenRes.ok || !tokenData.clientToken) {
+            if (!tokenRes.ok || !tokenData.uploadUrl) {
                 throw new Error(tokenData.error || t('blobUploadFailed'));
             }
             if (onProgress) onProgress(5);
 
-            // Step 2: PUT file directly to Vercel Blob CDN (bypasses Vercel function size limit)
-            const putRes = await fetch(tokenData.url, {
+            // Step 2: PUT file directly to Vercel Blob CDN using signed URL
+            const putRes = await fetch(tokenData.uploadUrl, {
                 method: 'PUT',
-                headers: {
-                    'authorization': `Bearer ${tokenData.clientToken}`,
-                    'x-content-type': file.type || 'video/mp4',
-                },
+                headers: { 'content-type': file.type || 'video/mp4' },
                 body: file,
             });
             if (!putRes.ok) {
@@ -2435,7 +2427,7 @@
                 throw new Error(t('blobUploadFailed') + ': ' + putRes.status + ' ' + errText);
             }
             const blobData = await putRes.json().catch(() => ({}));
-            const blobUrl = blobData.url;
+            const blobUrl = blobData.url || tokenData.url;
             if (!blobUrl) throw new Error(t('blobUploadFailed') + ': no URL returned');
             if (onProgress) onProgress(80);
 
