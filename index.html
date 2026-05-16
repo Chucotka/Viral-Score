@@ -2415,7 +2415,7 @@
             // Step 2: PUT file directly to Vercel Blob CDN
             const blobResult = await new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
-                xhr.open('PUT', `https://blob.vercel-storage.com/${encodeURIComponent(file.name || 'video.mp4')}`);
+                xhr.open('PUT', `https://blob.vercel-storage.com/${encodeURIComponent(tokenData.pathname || file.name || 'video.mp4')}`);
                 xhr.setRequestHeader('authorization', `Bearer ${tokenData.clientToken}`);
                 xhr.setRequestHeader('x-content-type', file.type || 'video/mp4');
 
