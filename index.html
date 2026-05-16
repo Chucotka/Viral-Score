@@ -2082,11 +2082,14 @@
 
         const state = {
             apiKey: safeStorage.getItem(STORAGE_KEYS.apiKey) || '',
-            backendUrl: window.location.protocol === 'file:'
-                ? (safeStorage.getItem(STORAGE_KEYS.backendUrl) && isLocalBackendUrlValue(safeStorage.getItem(STORAGE_KEYS.backendUrl))
-                    ? safeStorage.getItem(STORAGE_KEYS.backendUrl)
-                    : DEFAULT_BACKEND_URL)
-                : (safeStorage.getItem(STORAGE_KEYS.backendUrl) || DEFAULT_BACKEND_URL),
+            backendUrl: (() => {
+                const storedBackendUrl = safeStorage.getItem(STORAGE_KEYS.backendUrl) || '';
+                const storedIsLocal = isLocalBackendUrlValue(storedBackendUrl);
+                if (window.location.protocol === 'file:') {
+                    return storedIsLocal ? storedBackendUrl : DEFAULT_BACKEND_URL;
+                }
+                return storedBackendUrl && !storedIsLocal ? storedBackendUrl : DEFAULT_BACKEND_URL;
+            })(),
             lang: safeStorage.getItem(STORAGE_KEYS.lang) || (navigator.language && navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'),
             billingMode: safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both',
             starsInvoiceUrl: safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '',
