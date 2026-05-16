@@ -894,7 +894,7 @@ export default async function handler(req, res) {
     // directly to Google without going through Vercel (no 4.5MB limit).
     if (req.method === 'POST' && path === '/api/upload-session') {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
-      const body = await readJson(req, url);
+      const body = await readJson(req, url).catch(() => ({}));
       const mimeType = String(body?.mimeType || 'video/mp4').trim();
       const fileSize = Number(body?.fileSize || 0);
       const fileName = String(body?.fileName || 'video.mp4').trim().slice(0, 200);

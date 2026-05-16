@@ -2439,6 +2439,12 @@
             try {
                 const sessionRes = await fetch(sessionUrl, {
                     method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mimeType: file.type || 'video/mp4',
+                        fileSize: file.size || 0,
+                        fileName: file.name || 'video.mp4'
+                    }),
                     signal: controller.signal
                 });
                 const sessionData = await sessionRes.json().catch(() => ({}));
