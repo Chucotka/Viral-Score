@@ -3606,6 +3606,19 @@
         }
 
         async function callGemini(requestBody) {
+            if (state.backendUrl) {
+                const mode = state.currentMode || 'pro';
+                const response = await fetch(`${state.backendUrl}/api/generate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ requestBody, mode })
+                });
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err?.error || `Server error: ${response.status}`);
+                }
+                return response.json();
+            }
             let lastError = null;
             const quick = state.currentMode === 'quick';
             const ad = state.currentMode === 'ad';

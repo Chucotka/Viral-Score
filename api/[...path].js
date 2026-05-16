@@ -1063,6 +1063,15 @@ export default async function handler(req, res) {
       return sendJson(res, 200, await handleTelegramUpdate(update));
     }
 
+        if (req.method === 'POST' && path === '/api/generate') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const body = await readJson(req, url);
+      const { requestBody, mode } = body || {};
+      if (!requestBody) return sendJson(res, 400, { error: 'requestBody is required.' });
+      const data = await callGemini(requestBody, mode || 'pro');
+      return sendJson(res, 200, data);
+    }
+
     if (req.method === 'POST' && path === '/api/analyze') {
       if (!GEMINI_API_KEY) {
         return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured on the server.' });
