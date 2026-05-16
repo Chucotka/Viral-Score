@@ -2419,7 +2419,7 @@
                 xhr.open('PUT', `https://blob.vercel-storage.com/${encodeURIComponent(file.name || 'video.mp4')}`);
                 xhr.setRequestHeader('authorization', `Bearer ${tokenData.clientToken}`);
                 xhr.setRequestHeader('x-content-type', file.type || 'video/mp4');
-                xhr.setRequestHeader('x-add-random-suffix', '1');
+
                 xhr.upload.onprogress = (e) => {
                     if (e.lengthComputable && onProgress) {
                         onProgress(5 + Math.round((e.loaded / e.total) * 70));
