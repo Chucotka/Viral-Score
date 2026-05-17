@@ -35,7 +35,7 @@ async function downloadTgFile(fileId) {
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
 const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.0-flash', 'gemini-2.5-flash'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.0-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -197,12 +197,12 @@ function getPromptBase({ platform, mode, sourceType, language, context }) {
       };
   const sourceGuides = russian
     ? {
-        'video-file': 'Анализируй само загруженное видео. Сфокусируйся на первых секундах, темпе, визуальной ясности, тексте на экране, эмоции и шеринге.',
+        'video-file': 'Анализируй само загруженное видео. Сфокусируйся на первых секундах, темпе, визуальной ясности, тексте на экране, эмоции и шеринге. Если ролик длинный — смотри в первую очередь первые 30–45 секунд.',
         'video-url': 'Анализируй публичное видео или страницу по ссылке. Если URL context доступен, используй его; иначе опирайся на ссылку и контекст пользователя.',
         'text': 'Анализируй переданный текст, caption, транскрипт или сценарий как концепт поста.'
       }
     : {
-        'video-file': 'Analyze the uploaded video itself. Focus on the opening seconds, pacing, visual clarity, on-screen text, emotion, and shareability.',
+        'video-file': 'Analyze the uploaded video itself. Focus on the opening seconds, pacing, visual clarity, on-screen text, emotion, and shareability. If the clip is long, prioritize the first 30–45 seconds only.',
         'video-url': 'Analyze the linked public video or page. If URL context is available, use it; otherwise reason from the URL and provided context.',
         'text': 'Analyze the supplied text, caption, transcript, or script as a post concept.'
       };
@@ -522,32 +522,34 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
 }
 
 const GEMINI_GENERATE_TIMEOUT_MS = 90000;
-const GEMINI_VIDEO_GENERATE_TIMEOUT_MS = 100000;
+const GEMINI_VIDEO_GENERATE_TIMEOUT_MS = 150000;
 
 async function callGemini(requestBody, mode = 'pro', options = {}) {
   const isVideo = options.isVideo === true;
   const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
-  const maxOutputTokens = isVideo ? 1024 : (quick ? 1536 : 2200);
+  const maxOutputTokens = isVideo ? 768 : (quick ? 1536 : 2200);
   const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
   const timeoutMs = isVideo ? GEMINI_VIDEO_GENERATE_TIMEOUT_MS : GEMINI_GENERATE_TIMEOUT_MS;
   let lastError = null;
   for (const model of models) {
     try {
+      const generationConfig = {
+        temperature,
+        topP: 0.92,
+        maxOutputTokens,
+        responseMimeType: 'application/json',
+        responseSchema: ANALYSIS_SCHEMA
+      };
+      if (isVideo) generationConfig.mediaResolution = 'LOW';
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           ...requestBody,
-          generationConfig: {
-            temperature,
-            topP: 0.92,
-            maxOutputTokens,
-            responseMimeType: 'application/json',
-            responseSchema: ANALYSIS_SCHEMA
-          }
+          generationConfig
         })
       });
       if (response.ok) return response.json();
@@ -561,6 +563,42 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
     }
   }
   throw lastError || new Error('All Gemini models failed.');
+}
+
+async function ensureGeminiFileActive(fileUri, mimeType, maxWaitMs = 45000) {
+  const resource = geminiFileResourcePath(fileUri);
+  if (!resource) return { uri: fileUri, mimeType };
+  const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+  if (!statusResponse.ok) return { uri: fileUri, mimeType };
+  const meta = await statusResponse.json();
+  if (!meta.state || meta.state === 'ACTIVE') {
+    return { uri: meta.uri || fileUri, mimeType: mimeType || meta.mimeType };
+  }
+  if (meta.state === 'FAILED') throw new Error('Video processing failed on Gemini.');
+  return waitGeminiFileProcessed(resource, mimeType, meta, maxWaitMs);
+}
+
+async function callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, language }) {
+  try {
+    return await callGemini(requestBody, mode, { isVideo: true });
+  } catch (error) {
+    const msg = String(error?.message || '');
+    if (!/timed out|timeout/i.test(msg)) throw error;
+    const russian = language === 'ru';
+    const note = russian
+      ? 'Полный просмотр видео не успел завершиться в срок. Дай осторожную оценку по контексту пользователя и best practices для коротких роликов; в summary укажи, что разбор видео был усечён по времени.'
+      : 'Full video scan timed out. Give a conservative score using user context and short-form best practices; note in summary that the video scan was time-limited.';
+    const fallbackBody = {
+      contents: [{
+        parts: [{
+          text: [prompt, `[${note}]`, context ? (russian ? `Контекст:\n${context}` : `Context:\n${context}`) : '']
+            .filter(Boolean)
+            .join('\n\n')
+        }]
+      }]
+    };
+    return await callGemini(fallbackBody, 'quick', { isVideo: false });
+  }
 }
 
 function extractModelText(data) {
@@ -670,10 +708,14 @@ async function analyzeMultipart(formData) {
     }
     if (!uploadedFile) throw new Error('Missing uploaded video file.');
     if (!uploadedFile.uri) throw new Error('Missing file URI. Upload may have failed.');
+    uploadedFile = await ensureGeminiFileActive(uploadedFile.uri, uploadedFile.mimeType, 45000);
     requestBody = {
       contents: [{
         parts: [
-          { file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' } },
+          {
+            file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' },
+            media_resolution: { level: 'MEDIA_RESOLUTION_LOW' }
+          },
           { text: prompt }
         ]
       }]
@@ -731,7 +773,9 @@ async function analyzeMultipart(formData) {
     };
   }
 
-  const data = await callGemini(requestBody, mode, { isVideo: sourceType === 'video-file' });
+  const data = sourceType === 'video-file'
+    ? await callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, language })
+    : await callGemini(requestBody, mode, { isVideo: false });
   const finishReason = data?.candidates?.[0]?.finishReason;
   if (finishReason === 'MAX_TOKENS') {
     throw new Error('Gemini response was cut off.');

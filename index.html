@@ -1798,7 +1798,8 @@
                 pasteTextFirst: 'Paste your caption, transcript, or script first.',
                 localFileBlocked: 'Video upload is blocked from a local file page. Open the app from HTTPS/Telegram hosting, or test with a public YouTube link.',
                 analysisFailed: 'Analysis failed. Check the input and your API key, then try again.',
-                analysisTimeout: 'The analysis took too long. Try a shorter video, Quick mode, or run it again.',
+                analysisTimeout: 'The analysis took too long. Wait until the file shows ready, try a shorter clip (under 60s), or run again.',
+                analysisRetrying: 'Retrying analysis...',
                 retryAnalysis: 'Retry analysis',
                 restoreDraft: 'Restore draft',
                 incompleteJson: 'Gemini returned incomplete JSON. Try again, or use Quick mode for a shorter analysis.',
@@ -1980,7 +1981,8 @@
                 pasteTextFirst: 'Сначала вставь caption, транскрипт или сценарий.',
                 localFileBlocked: 'Загрузка видео заблокирована со страницы file://. Открой приложение через HTTPS/Telegram hosting или протестируй публичную YouTube-ссылку.',
                 analysisFailed: 'Анализ не удался. Проверь входные данные и API key, затем попробуй снова.',
-                analysisTimeout: 'Анализ занял слишком много времени. Попробуй более короткое видео, режим «Быстро» или запусти анализ ещё раз.',
+                analysisTimeout: 'Анализ занял слишком много времени. Дождись «Готово к анализу», попробуй ролик короче 60 с или запусти снова.',
+                analysisRetrying: 'Повторяем анализ...',
                 retryAnalysis: 'Повторить анализ',
                 restoreDraft: 'Восстановить черновик',
                 incompleteJson: 'Gemini вернул неполный JSON. Попробуй ещё раз или включи режим “Быстро”.',
@@ -2042,7 +2044,8 @@
         /** Separate /api/proxy-upload call (keeps /api/analyze under Vercel 300s limit). */
         const PROXY_UPLOAD_CLIENT_TIMEOUT_MS = 280000;
         /** /api/analyze only — prep (Blob→Gemini) runs in separate requests before this. */
-        const ANALYSIS_REQUEST_TIMEOUT_MS = 200000;
+        const ANALYSIS_REQUEST_TIMEOUT_MS = 240000;
+        const GEMINI_FILE_READY_MAX_MS = 90000;
         let uploadProgressTickerId = null;
         const ANALYSIS_SCHEMA = {
             type: 'object',
@@ -2695,7 +2698,7 @@
         }
 
         function startBackgroundGeminiTransfer(blobUrl, mimeType, fileName) {
-            if (!blobUrl || state.uploadedVideoFileUri || isTelegramWebApp()) return;
+            if (!blobUrl || state.uploadedVideoFileUri || isTelegramWebApp() || state.geminiTransferPromise) return;
             syncVideoAnalyzeButton();
             state.geminiTransferPromise = ensureGeminiFileFromBlob(blobUrl, mimeType, fileName)
                 .then((result) => {
@@ -3669,9 +3672,27 @@
             }
         }
 
+        async function waitForGeminiUriActive(fileUri, maxMs = GEMINI_FILE_READY_MAX_MS) {
+            const name = geminiResourceFromUri(fileUri);
+            if (!name) return;
+            const statusBase = getBackendEndpointUrl('/api/file-status');
+            if (!statusBase) return;
+            const started = Date.now();
+            let delayMs = 0;
+            while (Date.now() - started < maxMs) {
+                if (delayMs) await sleep(delayMs);
+                delayMs = delayMs ? Math.min(Math.round(delayMs * 1.45), 2200) : 400;
+                const statusRes = await fetch(`${statusBase}?name=${encodeURIComponent(name)}`);
+                const meta = await statusRes.json().catch(() => ({}));
+                if (!statusRes.ok) continue;
+                if (meta.state === 'ACTIVE') return meta;
+                if (meta.state === 'FAILED') throw new Error(t('fileProcessFailed'));
+            }
+            console.warn('Gemini file still processing after wait; continuing anyway.');
+        }
+
         async function waitForVideoAnalysisReady() {
             if (state.currentSourceType !== 'video-file' || isLocalBackendUrl()) return;
-            if (state.uploadedVideoFileUri) return;
             if (state.geminiTransferPromise) {
                 setLoadingStage(t('preparingGemini'), { creep: true, maxMs: PROXY_UPLOAD_CLIENT_TIMEOUT_MS });
                 try {
@@ -3682,6 +3703,10 @@
             }
             if (state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri) {
                 throw new Error(t('videoTransferFailed'));
+            }
+            if (state.uploadedVideoFileUri) {
+                setLoadingStage(t('processing'), { creep: true, maxMs: GEMINI_FILE_READY_MAX_MS });
+                await waitForGeminiUriActive(state.uploadedVideoFileUri);
             }
         }
 
@@ -5074,7 +5099,18 @@
                 let usedBackend = false;
                 const analysisId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
                 if (state.backendUrl) {
-                    const backendResponse = await callAnalysisBackend(analysisId);
+                    let backendResponse;
+                    try {
+                        backendResponse = await callAnalysisBackend(analysisId);
+                    } catch (firstErr) {
+                        const msg = String(firstErr?.message || '');
+                        const canRetry = state.currentSourceType === 'video-file'
+                            && /too long|timed out|timeout/i.test(msg);
+                        if (!canRetry) throw firstErr;
+                        setLoadingStage(t('analysisRetrying'), { creep: true, maxMs: ANALYSIS_REQUEST_TIMEOUT_MS });
+                        await sleep(1200);
+                        backendResponse = await callAnalysisBackend(analysisId);
+                    }
                     parsed = normalizeAnalysisResult(backendResponse.result || backendResponse.analysis || backendResponse);
                     usedBackend = true;
                     if (typeof backendResponse.usageCount === 'number') {
