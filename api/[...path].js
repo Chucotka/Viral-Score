@@ -389,7 +389,8 @@ async function uploadVideoFile(file) {
 }
 
 // Stream a video directly from a URL (e.g. Vercel Blob) to Gemini without buffering in memory
-async function uploadVideoFromBlobUrl(videoUrl) {
+async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
+  const waitForActive = options.waitForActive !== false;
   // Download into Buffer first — streaming via duplex:half hangs in Vercel runtime
   const videoResponse = await fetch(videoUrl);
   if (!videoResponse.ok) throw new Error(`Could not fetch video from storage: ${videoResponse.status}`);
@@ -439,7 +440,7 @@ async function uploadVideoFromBlobUrl(videoUrl) {
   const uploadedFile = uploadData.file || uploadData;
   const uploadName = uploadedFile.name || uploadData.name;
   let fileState = uploadedFile.state || 'ACTIVE';
-  if (uploadName && fileState !== 'ACTIVE') {
+  if (waitForActive && uploadName && fileState !== 'ACTIVE') {
     return waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
   }
   return { ...uploadedFile, mimeType };
@@ -1046,11 +1047,7 @@ export default async function handler(req, res) {
         const data = JSON.parse(text);
         const uploadedFile = data.file || data;
         const uploadName = uploadedFile?.name || data?.name;
-        if (sessionId) geminiUploadSessionStore.delete(sessionId);
-        if (uploadName && uploadedFile?.state !== 'ACTIVE') {
-          const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
-          return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });
-        }
+        if (sessionId && /finalize/i.test(command)) geminiUploadSessionStore.delete(sessionId);
         return sendJson(res, 200, { file: uploadedFile, mimeType });
       } catch {
         return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
@@ -1066,7 +1063,7 @@ export default async function handler(req, res) {
       const fileName = String(body?.fileName || 'video.mp4').trim().slice(0, 200);
       if (!blobUrl) return sendJson(res, 400, { error: 'blobUrl required' });
       try {
-        const uploadedFile = await uploadVideoFromBlobUrl(blobUrl);
+        const uploadedFile = await uploadVideoFromBlobUrl(blobUrl, { waitForActive: false });
         if (!uploadedFile?.uri) return sendJson(res, 502, { error: 'Missing file URI from Gemini.' });
         return sendJson(res, 200, { file: uploadedFile, mimeType: uploadedFile.mimeType || mimeType, fileName });
       } catch (e) {
