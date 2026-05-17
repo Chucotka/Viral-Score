@@ -783,8 +783,14 @@ async function handleTelegramUpdate(update) {
       // Extract clientId from caption or use chatId as fallback key
       const caption = String(msg.caption || msg.text || '');
       const clientMatch = caption.match(/client[_:]?([a-zA-Z0-9_-]{8,})/i);
-      const clientId = `tg:${chatId}`;
+      const userId = msg.from?.id;
+      const clientId = clientMatch
+        ? clientMatch[1]
+        : (userId ? `tg:${userId}` : `tg:${chatId}`);
       storeTgVideo(clientId, fileId, mimeType);
+      if (userId && chatId && String(userId) !== String(chatId)) {
+        storeTgVideo(`tg:${chatId}`, fileId, mimeType);
+      }
       if (chatId) {
         await sendTgMessage(chatId,
           `✅ Видео получено!
