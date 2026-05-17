@@ -2028,8 +2028,8 @@
         const SERVER_UPLOAD_CHUNK_BYTES = Math.floor(2.4 * 1024 * 1024);
         const TELEGRAM_BLOB_TIMEOUT_MS = 120000;
         const NETWORK_TIMEOUT_MS = 120000;
-        /** Client → Blob CDN often hangs (UI stuck ~42%); fail fast and switch to chunked upload. */
-        const CLIENT_BLOB_TRY_MS = 12000;
+        /** Client → Blob CDN: short try for small files, then server /api/blob/put fallback. */
+        const CLIENT_BLOB_TRY_MS = 45000;
         const BLOB_STALL_SWITCH_MS = 15000;
         const CHUNK_UPLOAD_STALL_MS = 45000;
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
@@ -3061,8 +3061,12 @@
             }
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
-            const blobTimeoutMs = options.timeoutMs
-                || (isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : CLIENT_BLOB_TRY_MS);
+            const fileSize = Number(file.size || 0);
+            const isLarge = fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES;
+            const defaultBlobTimeout = isTelegramWebApp()
+                ? TELEGRAM_BLOB_TIMEOUT_MS
+                : (isLarge ? GEMINI_UPLOAD_TIMEOUT_MS : CLIENT_BLOB_TRY_MS);
+            const blobTimeoutMs = options.timeoutMs || defaultBlobTimeout;
 
             const tryClientUpload = () => Promise.race([
                 loadBlobClientUpload().then((upload) => upload(file.name, file, { access: 'public', handleUploadUrl })),
@@ -3071,8 +3075,6 @@
                 })
             ]);
 
-            const fileSize = Number(file.size || 0);
-            const isLarge = fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES;
             if (!isLarge) startUploadProgressTicker(onProgress, 12, 42);
             else startUploadProgressTicker(onProgress, 8, 84);
             try {
@@ -3087,7 +3089,9 @@
                 if (message.includes('BLOB_READ_WRITE_TOKEN') && message.includes('not configured')) {
                     throw new Error(t('blobNotConfigured'));
                 }
-                if (isLarge) throw error;
+                const blobFail = new Error(t('blobUploadFailed'));
+                if (message.includes('CLIENT_BLOB_TIMEOUT')) blobFail.code = 'CLIENT_BLOB_TIMEOUT';
+                if (isLarge) throw blobFail;
                 if (onProgress) onProgress(45);
                 if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                     try {
@@ -3095,10 +3099,10 @@
                         if (onProgress) onProgress(100);
                         return fallback;
                     } catch (fallbackErr) {
-                        throw new Error(fallbackErr?.message || message || t('blobUploadFailed'));
+                        throw new Error(fallbackErr?.message || t('blobUploadFailed'));
                     }
                 }
-                throw new Error(message.includes('CLIENT_BLOB_TIMEOUT') ? t('blobUploadFailed') : (message || t('blobUploadFailed')));
+                throw blobFail;
             }
         }
 
@@ -3303,22 +3307,23 @@
 
             if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                 let largeErr = null;
-                if (blobOk) {
-                    try {
-                        if (onProgress) onProgress(6);
-                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
-                        return await finishBlobUpload(file, blob, onProgress);
-                    } catch (blobErr) {
-                        largeErr = blobErr;
-                        console.warn('Large file Blob upload failed, trying chunks:', blobErr);
-                    }
-                }
                 try {
                     if (onProgress) onProgress(10);
                     return await uploadVideoViaChunkedServer(file, onProgress);
                 } catch (chunkErr) {
                     largeErr = chunkErr;
                     console.warn('Chunked Gemini upload failed:', chunkErr);
+                    if (onProgress) onProgress(12);
+                }
+                if (blobOk && !isTelegramWebApp()) {
+                    try {
+                        if (onProgress) onProgress(6);
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
+                        return await finishBlobUpload(file, blob, onProgress);
+                    } catch (blobErr) {
+                        console.warn('Large file Blob fallback failed:', blobErr);
+                        if (!largeErr) largeErr = blobErr;
+                    }
                 }
                 if (isTelegramWebApp() && blobOk) {
                     try {
@@ -3342,10 +3347,21 @@
                 throw largeErr || new Error(t('blobUploadFailed'));
             }
 
-            if (blobOk) {
-                if (onProgress) onProgress(10);
-                const blob = await uploadVideoToBlob(file, onProgress);
-                return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+            if (blobOk && fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                try {
+                    if (onProgress) onProgress(10);
+                    const blob = await uploadVideoToBlobViaServer(file, onProgress);
+                    return await finishBlobUpload(file, blob, onProgress);
+                } catch (serverBlobErr) {
+                    console.warn('Server Blob upload failed, trying client:', serverBlobErr);
+                }
+                try {
+                    if (onProgress) onProgress(12);
+                    const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: CLIENT_BLOB_TRY_MS });
+                    return await finishBlobUpload(file, blob, onProgress);
+                } catch (clientBlobErr) {
+                    console.warn('Client Blob upload failed:', clientBlobErr);
+                }
             }
 
             if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
