@@ -1026,21 +1026,27 @@ export default async function handler(req, res) {
           'Content-Length': String(buffer.length),
           'Content-Type': mimeType
         },
-        body: buffer
+        body: buffer,
+        signal: AbortSignal.timeout(/finalize/i.test(command) ? 120000 : 55000)
       });
       if (!uploadRes.ok) {
         return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini chunk upload failed: ${uploadRes.status}`) });
       }
       let text = await uploadRes.text();
       if (!text && /finalize/i.test(command)) {
-        const queryRes = await fetch(uploadUrl, {
-          method: 'POST',
-          headers: {
-            'X-Goog-Upload-Offset': '0',
-            'X-Goog-Upload-Command': 'query'
-          }
-        });
-        if (queryRes.ok) text = await queryRes.text();
+        const queryOffset = String(offset + buffer.length);
+        for (let attempt = 0; attempt < 12 && !text; attempt += 1) {
+          if (attempt) await new Promise((r) => setTimeout(r, Math.min(500 + attempt * 400, 3000)));
+          const queryRes = await fetch(uploadUrl, {
+            method: 'POST',
+            headers: {
+              'X-Goog-Upload-Offset': queryOffset,
+              'X-Goog-Upload-Command': 'query'
+            },
+            signal: AbortSignal.timeout(45000)
+          });
+          if (queryRes.ok) text = await queryRes.text();
+        }
       }
       if (!text) return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
       try {

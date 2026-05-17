@@ -2033,6 +2033,8 @@
         const BLOB_STALL_SWITCH_MS = 15000;
         const CHUNK_UPLOAD_STALL_MS = 45000;
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
+        /** Browser prefetch: don't block on Blob→Gemini proxy (analyze uploads server-side). */
+        const PROXY_UPLOAD_CLIENT_TIMEOUT_MS = 90000;
         const ANALYSIS_TIMEOUT_MS = 299000;
         let uploadProgressTickerId = null;
         const ANALYSIS_SCHEMA = {
@@ -2498,14 +2500,15 @@
         }
 
         /** Smooth progress while waiting on network (avoids frozen UI at 20%). */
-        function startUploadProgressTicker(onProgress, fromPct, toPct) {
+        function startUploadProgressTicker(onProgress, fromPct, toPct, creepToPct) {
             stopUploadProgressTicker();
             if (!onProgress) return;
+            const ceiling = creepToPct != null ? creepToPct : toPct;
             let pct = fromPct;
             onProgress(pct);
             uploadProgressTickerId = setInterval(() => {
-                if (pct < toPct) {
-                    pct = Math.min(toPct, pct + 1);
+                if (pct < ceiling) {
+                    pct = Math.min(ceiling, pct + 1);
                     onProgress(pct);
                 }
             }, 700);
@@ -2577,9 +2580,9 @@
             const proxyUrl = getBackendEndpointUrl('/api/proxy-upload');
             if (!proxyUrl) throw new Error(t('backendRequired'));
             if (onProgress) onProgress(85);
-            startUploadProgressTicker(onProgress, 85, 96);
+            startUploadProgressTicker(onProgress, 85, 96, 99);
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), GEMINI_UPLOAD_TIMEOUT_MS);
+            const timeout = setTimeout(() => controller.abort(), PROXY_UPLOAD_CLIENT_TIMEOUT_MS);
             try {
                 const res = await fetch(proxyUrl, {
                     method: 'POST',
@@ -2596,7 +2599,7 @@
                 const uploadedFile = data?.file || data;
                 let fileUri = uploadedFile?.uri || '';
                 const fileResourceName = uploadedFile?.name || '';
-                if ((!fileUri || geminiFileNeedsProcessingWait(uploadedFile)) && fileResourceName) {
+                if (!fileUri && fileResourceName) {
                     if (onProgress) onProgress(97);
                     const meta = await waitForGeminiFileReady(fileResourceName, controller.signal, onProgress);
                     fileUri = meta?.uri || fileUri;
@@ -2619,6 +2622,15 @@
 
         async function finishBlobUpload(file, blobResult, onProgress) {
             if (!blobResult?.url) throw new Error(t('blobUploadFailed'));
+            // Website: Blob is enough for prefetch — Gemini upload runs during /api/analyze (avoids 88% hang).
+            if (!isTelegramWebApp()) {
+                if (onProgress) onProgress(100);
+                return {
+                    videoBlobUrl: blobResult.url,
+                    fileUri: '',
+                    mimeType: file.type || 'video/mp4'
+                };
+            }
             try {
                 return await completeBlobUploadToGemini(
                     blobResult.url,
@@ -2685,7 +2697,9 @@
             }
         }
 
-        const GEMINI_CHUNK_TIMEOUT_MS = 180000;
+        const GEMINI_CHUNK_TIMEOUT_MS = 120000;
+        /** No upload progress on XHR for this long → abort chunk and retry. */
+        const CHUNK_XHR_STALL_MS = 35000;
 
         async function xhrUploadChunkViaServerWithRetry(chunkBlob, uploadSessionId, offset, command, mimeType, onChunkProgress, timeoutMs) {
             let lastErr = null;
@@ -2704,20 +2718,35 @@
             const chunkUrl = getBackendEndpointUrl('/api/upload-chunk');
             if (!chunkUrl) return Promise.reject(new Error(t('backendRequired')));
             const isFinalize = /finalize/i.test(command);
-            const xhrTimeoutMs = timeoutMs || (isFinalize ? GEMINI_UPLOAD_TIMEOUT_MS : GEMINI_CHUNK_TIMEOUT_MS);
+            const xhrTimeoutMs = timeoutMs || (isFinalize ? GEMINI_UPLOAD_TIMEOUT_MS : CHUNK_UPLOAD_STALL_MS);
             return new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
+                let settled = false;
+                const finish = (fn, arg) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    clearInterval(stallWatch);
+                    fn(arg);
+                };
                 const timeout = setTimeout(() => {
                     xhr.abort();
-                    reject(new Error(t('analysisTimeout')));
+                    finish(reject, new Error(t('analysisTimeout')));
                 }, xhrTimeoutMs);
+                let lastProgressAt = Date.now();
+                const stallWatch = setInterval(() => {
+                    if (Date.now() - lastProgressAt > CHUNK_XHR_STALL_MS) {
+                        xhr.abort();
+                        finish(reject, new Error(t('analysisTimeout')));
+                    }
+                }, 4000);
                 xhr.upload.onprogress = (event) => {
+                    lastProgressAt = Date.now();
                     if (event.lengthComputable && onChunkProgress) {
                         onChunkProgress(event.loaded, event.total);
                     }
                 };
                 xhr.onload = () => {
-                    clearTimeout(timeout);
                     try {
                         if (xhr.status < 200 || xhr.status >= 300) {
                             let errMsg = `Chunk proxy failed: ${xhr.status}`;
@@ -2727,31 +2756,30 @@
                             } catch {
                                 if (xhr.responseText) errMsg = xhr.responseText.slice(0, 500);
                             }
-                            reject(new Error(errMsg));
+                            finish(reject, new Error(errMsg));
                             return;
                         }
                         if (!xhr.responseText) {
-                            resolve({ ok: true });
+                            finish(resolve, { ok: true });
                             return;
                         }
-                        resolve(JSON.parse(xhr.responseText));
+                        finish(resolve, JSON.parse(xhr.responseText));
                     } catch {
-                        resolve({ ok: true });
+                        finish(resolve, { ok: true });
                     }
                 };
                 xhr.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(new Error(t('blobUploadFailed')));
+                    finish(reject, new Error(t('blobUploadFailed')));
                 };
                 xhr.onabort = () => {
-                    clearTimeout(timeout);
-                    reject(new Error(t('analysisTimeout')));
+                    finish(reject, new Error(t('analysisTimeout')));
                 };
                 xhr.open('POST', chunkUrl);
                 xhr.setRequestHeader('x-upload-session-id', uploadSessionId);
                 xhr.setRequestHeader('x-chunk-offset', String(offset));
                 xhr.setRequestHeader('x-goog-upload-command', command);
                 xhr.setRequestHeader('x-mime-type', mimeType);
+                lastProgressAt = Date.now();
                 xhr.send(chunkBlob);
             });
         }
@@ -2808,8 +2836,9 @@
         }
 
         /** Browser → our API → Gemini (reliable when direct Google upload is blocked). */
-        async function uploadChunksViaServerProxy(file, uploadSessionId, mimeType, onProgress, signal) {
+        async function uploadChunksViaServerProxy(file, uploadSessionId, mimeType, onProgress, signal, options = {}) {
             const fileSize = Number(file.size || 0);
+            const finalizeTimeoutMs = options.finalizeTimeoutMs || GEMINI_UPLOAD_TIMEOUT_MS;
             let offset = 0;
             let lastPayload = null;
             const totalChunks = Math.max(1, Math.ceil(fileSize / SERVER_UPLOAD_CHUNK_BYTES));
@@ -2823,14 +2852,26 @@
                 chunkIndex += 1;
                 const isFinalize = /finalize/i.test(command);
                 if (onProgress) {
-                    if (isFinalize) onProgress(92);
-                    else onProgress(10 + Math.round(((chunkIndex - 1) / totalChunks) * 80));
+                    if (isFinalize) {
+                        onProgress(92);
+                        startUploadProgressTicker(onProgress, 92, 98, 99);
+                    } else {
+                        stopUploadProgressTicker();
+                        onProgress(10 + Math.round(((chunkIndex - 1) / totalChunks) * 80));
+                    }
                 }
-                const chunkTimeoutMs = isFinalize ? GEMINI_UPLOAD_TIMEOUT_MS : CHUNK_UPLOAD_STALL_MS;
+                const chunkTimeoutMs = isFinalize ? finalizeTimeoutMs : CHUNK_UPLOAD_STALL_MS;
+                const chunkTargetPct = isFinalize
+                    ? 95
+                    : Math.min(90, 10 + Math.round((chunkIndex / totalChunks) * 82));
+                if (onProgress && !isFinalize) {
+                    startUploadProgressTicker(onProgress, Math.max(10, chunkTargetPct - 5), chunkTargetPct, chunkTargetPct);
+                }
                 const chunkUpload = xhrUploadChunkViaServerWithRetry(
                     chunk, uploadSessionId, offset, command, mimeType,
                     (loaded, total) => {
                         if (!onProgress || !total) return;
+                        stopUploadProgressTicker();
                         const uploaded = chunkStart + loaded;
                         const pct = 10 + Math.round((uploaded / Math.max(fileSize, 1)) * 85);
                         onProgress(Math.min(isFinalize ? 95 : 96, pct));
@@ -2840,22 +2881,25 @@
                 const chunkTimeout = sleep(chunkTimeoutMs).then(() => {
                     throw new Error(t('analysisTimeout'));
                 });
-                lastPayload = await Promise.race([chunkUpload, chunkTimeout]);
+                try {
+                    lastPayload = await Promise.race([chunkUpload, chunkTimeout]);
+                } finally {
+                    stopUploadProgressTicker();
+                }
                 offset += chunkSize;
             }
-            const uploadedFile = lastPayload?.file || lastPayload;
+            const uploadedFile = lastPayload?.file || (lastPayload?.uri ? lastPayload : null);
             let fileUri = uploadedFile?.uri || '';
             const fileResourceName = uploadedFile?.name || '';
+            if (!fileUri && lastPayload?.ok) {
+                throw new Error(t('missingFileUri'));
+            }
             if (!fileUri && fileResourceName) {
                 if (onProgress) onProgress(97);
                 const meta = await waitForGeminiFileReady(fileResourceName, signal, onProgress);
                 fileUri = meta?.uri || '';
             }
             if (!fileUri) throw new Error(t('missingFileUri'));
-            if (onProgress) onProgress(97);
-            if (geminiFileNeedsProcessingWait(uploadedFile)) {
-                await waitForGeminiFileReady(fileResourceName, signal, onProgress);
-            }
             if (onProgress) onProgress(100);
             return { fileUri, mimeType, videoBlobUrl: '', geminiFile: uploadedFile };
         }
@@ -2982,6 +3026,7 @@
             if (!sessionUrl) throw new Error(t('backendRequired'));
             const mimeType = file.type || 'video/mp4';
             const fileSize = Number(file.size || 0);
+            const finalizeTimeoutMs = isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : GEMINI_CHUNK_TIMEOUT_MS;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), GEMINI_UPLOAD_TIMEOUT_MS);
             if (onProgress) onProgress(15);
@@ -3007,7 +3052,7 @@
                 if (uploadSessionId) {
                     try {
                         result = await uploadChunksViaServerProxy(
-                            file, uploadSessionId, mimeType, onProgress, controller.signal
+                            file, uploadSessionId, mimeType, onProgress, controller.signal, { finalizeTimeoutMs }
                         );
                     } catch (proxyErr) {
                         console.warn('Server chunk proxy failed, trying direct Gemini:', proxyErr);
@@ -3076,7 +3121,7 @@
             ]);
 
             if (!isLarge) startUploadProgressTicker(onProgress, 12, 42);
-            else startUploadProgressTicker(onProgress, 8, 84);
+            else startUploadProgressTicker(onProgress, 8, 72, isTelegramWebApp() ? 88 : 86);
             try {
                 const result = await tryClientUpload();
                 stopUploadProgressTicker();
@@ -3307,22 +3352,24 @@
 
             if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                 let largeErr = null;
-                try {
-                    if (onProgress) onProgress(10);
-                    return await uploadVideoViaChunkedServer(file, onProgress);
-                } catch (chunkErr) {
-                    largeErr = chunkErr;
-                    console.warn('Chunked Gemini upload failed:', chunkErr);
-                    if (onProgress) onProgress(12);
-                }
-                if (blobOk && !isTelegramWebApp()) {
+                if (!isTelegramWebApp() && blobOk) {
                     try {
-                        if (onProgress) onProgress(6);
+                        if (onProgress) onProgress(8);
                         const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
                         return await finishBlobUpload(file, blob, onProgress);
                     } catch (blobErr) {
-                        console.warn('Large file Blob fallback failed:', blobErr);
-                        if (!largeErr) largeErr = blobErr;
+                        largeErr = blobErr;
+                        console.warn('Website large Blob upload failed, trying chunked:', blobErr);
+                    }
+                }
+                for (let attempt = 0; attempt < 2; attempt += 1) {
+                    try {
+                        if (onProgress) onProgress(attempt ? 12 : 10);
+                        return await uploadVideoViaChunkedServer(file, onProgress);
+                    } catch (chunkErr) {
+                        largeErr = chunkErr;
+                        console.warn(`Chunked upload attempt ${attempt + 1} failed:`, chunkErr);
+                        if (attempt < 1) await sleep(800);
                     }
                 }
                 if (isTelegramWebApp() && blobOk) {
