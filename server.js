@@ -864,11 +864,16 @@ const server = http.createServer(async (req, res) => {
       if (!GEMINI_API_KEY) {
         return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured on the server.' });
       }
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', resolve);
+        req.on('error', reject);
+      });
       const request = new Request(url.toString(), {
         method: req.method,
         headers: req.headers,
-        body: Readable.toWeb(req),
-        duplex: 'half'
+        body: Buffer.concat(chunks)
       });
       const formData = await request.formData();
       const result = await analyzeMultipart(formData);

@@ -4927,7 +4927,10 @@
                     : raw;
                 formData.append('text', body);
             }
-            setLoadingStage(t('analyzingVideo'), { creep: true, maxMs: ANALYSIS_REQUEST_TIMEOUT_MS });
+            const analyzingStage = state.currentSourceType === 'video-file'
+                ? t('analyzingVideo')
+                : (state.currentSourceType === 'video-url' ? t('collectingContext') : t('scoringHook'));
+            setLoadingStage(analyzingStage, { creep: true, maxMs: ANALYSIS_REQUEST_TIMEOUT_MS });
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), ANALYSIS_REQUEST_TIMEOUT_MS);
             let response;
@@ -5298,7 +5301,26 @@
                 clearVideoSelection();
             });
 
-            analyzeBtn.addEventListener('click', analyzeContent);
+            analyzeBtn.addEventListener('click', () => {
+                if (analyzeBtn.disabled) {
+                    let hint = '';
+                    if (state.uploadInProgress || state.blobUploadPromise) {
+                        hint = state.lang === 'ru'
+                            ? 'Дождись окончания загрузки видео (смотри статус под превью).'
+                            : 'Wait for the video upload to finish (see status under the preview).';
+                    } else if (state.geminiTransferPromise || (state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri)) {
+                        hint = state.lang === 'ru'
+                            ? 'Готовим видео для AI — подожди несколько секунд.'
+                            : 'Preparing video for AI — wait a few seconds.';
+                    } else {
+                        hint = state.lang === 'ru' ? 'Кнопка временно недоступна.' : 'Button is temporarily unavailable.';
+                    }
+                    mainError.textContent = hint;
+                    mainError.style.display = 'block';
+                    return;
+                }
+                analyzeContent();
+            });
             analyzeAgainBtn.addEventListener('click', () => setScreen('main'));
             shareBtn.addEventListener('click', () => {
                 if (!state.lastAnalysisResult) return;

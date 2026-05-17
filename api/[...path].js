@@ -949,24 +949,32 @@ async function handleTelegramUpdate(update) {
   return { ok: true, handled: false };
 }
 
-async function readJson(req, url) {
+async function readRawBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
-    req.on('end', () => {
-      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-      catch (e) { reject(e); }
-    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
 
+async function readJson(req, url) {
+  const buffer = await readRawBody(req);
+  if (!buffer.length) return {};
+  try {
+    return JSON.parse(buffer.toString('utf8'));
+  } catch (e) {
+    throw e;
+  }
+}
+
+/** Buffer body first — Readable.toWeb(req) + formData() hangs on Vercel (same as blob upload). */
 async function readFormData(req, url) {
+  const buffer = await readRawBody(req);
   const request = new Request(url.toString(), {
     method: req.method,
     headers: req.headers,
-    body: Readable.toWeb(req),
-    duplex: 'half'
+    body: buffer
   });
   return request.formData();
 }
