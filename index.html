@@ -1816,6 +1816,7 @@
                 directUploadNetworkError: 'Browser blocked the direct upload to Google. Paste a public video link, use a smaller file, or open the app in a regular browser.',
                 uploadStillWorking: 'Still uploading, please wait…',
                 uploadSwitchingMethod: 'Switching upload method…',
+                uploadProcessingGemini: 'Processing video on Gemini servers…',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
                 paidWithStars: 'Access unlocked with Stars.',
@@ -1994,6 +1995,7 @@
                 directUploadNetworkError: 'Браузер заблокировал прямую загрузку в Google. Вставь публичную ссылку, сожми файл или открой приложение в обычном браузере.',
                 uploadStillWorking: 'Загрузка продолжается, подожди…',
                 uploadSwitchingMethod: 'Пробуем другой способ загрузки…',
+                uploadProcessingGemini: 'Обработка видео на серверах Gemini…',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
                 paidWithStars: 'Доступ разблокирован через Stars.',
@@ -2576,58 +2578,97 @@
             }
         }
 
+        const GEMINI_CHUNK_TIMEOUT_MS = 180000;
+
+        function xhrGeminiChunkUpload(chunkBlob, geminiUploadUrl, offset, command, mimeType, onChunkProgress) {
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const timeout = setTimeout(() => {
+                    xhr.abort();
+                    reject(new Error(t('analysisTimeout')));
+                }, GEMINI_CHUNK_TIMEOUT_MS);
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable && onChunkProgress) {
+                        onChunkProgress(event.loaded, event.total);
+                    }
+                };
+                xhr.onload = () => {
+                    clearTimeout(timeout);
+                    try {
+                        if (xhr.status < 200 || xhr.status >= 300) {
+                            let errMsg = `Gemini chunk failed: ${xhr.status}`;
+                            try {
+                                const errJson = JSON.parse(xhr.responseText || '{}');
+                                errMsg = errJson?.error?.message || errJson?.error || xhr.responseText || errMsg;
+                            } catch {
+                                if (xhr.responseText) errMsg = xhr.responseText.slice(0, 500);
+                            }
+                            reject(new Error(errMsg));
+                            return;
+                        }
+                        if (!xhr.responseText) {
+                            resolve({ ok: true });
+                            return;
+                        }
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch {
+                        resolve({ ok: true });
+                    }
+                };
+                xhr.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(t('directUploadNetworkError')));
+                };
+                xhr.onabort = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(t('analysisTimeout')));
+                };
+                xhr.open('POST', geminiUploadUrl);
+                xhr.setRequestHeader('Content-Type', mimeType);
+                xhr.setRequestHeader('X-Goog-Upload-Offset', String(offset));
+                xhr.setRequestHeader('X-Goog-Upload-Command', command);
+                xhr.send(chunkBlob);
+            });
+        }
+
         /** Browser → Gemini in 8MB steps (required chunk granularity). */
         async function uploadChunksDirectToGemini(file, geminiUploadUrl, mimeType, onProgress, signal) {
             const fileSize = Number(file.size || 0);
             let offset = 0;
             let lastPayload = null;
+            const totalChunks = Math.max(1, Math.ceil(fileSize / GEMINI_UPLOAD_CHUNK_BYTES));
+            let chunkIndex = 0;
             while (offset < fileSize) {
                 const remaining = fileSize - offset;
                 const isLast = remaining <= GEMINI_UPLOAD_CHUNK_BYTES;
                 const chunkSize = isLast ? remaining : GEMINI_UPLOAD_CHUNK_BYTES;
                 const chunk = file.slice(offset, offset + chunkSize);
                 const command = offset + chunkSize >= fileSize ? 'upload, finalize' : 'upload';
-                const uploadRes = await fetch(geminiUploadUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': mimeType,
-                        'X-Goog-Upload-Offset': String(offset),
-                        'X-Goog-Upload-Command': command
-                    },
-                    body: chunk,
-                    signal
-                });
-                const responseText = await uploadRes.text();
-                if (!uploadRes.ok) {
-                    let errMsg = `Gemini upload failed: ${uploadRes.status}`;
-                    try {
-                        const errJson = JSON.parse(responseText);
-                        errMsg = errJson?.error?.message || errJson?.error || responseText || errMsg;
-                    } catch {
-                        if (responseText) errMsg = responseText.slice(0, 500);
-                    }
-                    throw new Error(errMsg);
-                }
-                if (responseText) {
-                    try {
-                        lastPayload = JSON.parse(responseText);
-                    } catch {
-                        /* intermediate chunk — empty body is ok */
-                    }
-                }
-                offset += chunkSize;
+                const chunkStart = offset;
+                chunkIndex += 1;
                 if (onProgress) {
-                    const pct = 28 + Math.round((offset / Math.max(fileSize, 1)) * 64);
-                    onProgress(Math.min(92, pct));
+                    onProgress(10 + Math.round(((chunkIndex - 1) / totalChunks) * 78));
                 }
+                lastPayload = await xhrGeminiChunkUpload(
+                    chunk, geminiUploadUrl, offset, command, mimeType,
+                    (loaded, total) => {
+                        if (!onProgress || !total) return;
+                        const uploaded = chunkStart + loaded;
+                        const pct = 10 + Math.round((uploaded / Math.max(fileSize, 1)) * 82);
+                        onProgress(Math.min(92, pct));
+                    }
+                );
+                offset += chunkSize;
             }
             const uploadedFile = lastPayload?.file || lastPayload;
             const fileUri = uploadedFile?.uri || '';
             const fileResourceName = uploadedFile?.name || '';
             if (!fileUri) throw new Error(t('missingFileUri'));
+            if (onProgress) onProgress(93);
             if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
-                await waitForGeminiFileReady(fileResourceName, signal);
+                await waitForGeminiFileReady(fileResourceName, signal, onProgress);
             }
+            if (onProgress) onProgress(100);
             return { fileUri, mimeType, videoBlobUrl: '', geminiFile: uploadedFile };
         }
 
@@ -2794,23 +2835,31 @@
 
             const fileSize = Number(file.size || 0);
             const isLarge = fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES;
-            startUploadProgressTicker(onProgress, 12, isLarge ? 88 : 42);
+            if (!isLarge) startUploadProgressTicker(onProgress, 12, 42);
+            else if (onProgress) onProgress(8);
+            let blobPulseId = null;
+            let blobPulsePct = 8;
+            if (isLarge && onProgress) {
+                blobPulseId = setInterval(() => {
+                    blobPulsePct = Math.min(78, blobPulsePct + 1);
+                    onProgress(blobPulsePct);
+                }, 2500);
+            }
             try {
                 const result = await tryClientUpload();
+                if (blobPulseId) clearInterval(blobPulseId);
                 stopUploadProgressTicker();
                 if (!result?.url) throw new Error(t('blobUploadFailed'));
                 if (onProgress) onProgress(100);
                 return result;
             } catch (error) {
+                if (blobPulseId) clearInterval(blobPulseId);
                 stopUploadProgressTicker();
                 const message = String(error?.message || '');
                 if (message.includes('BLOB_READ_WRITE_TOKEN') && message.includes('not configured')) {
                     throw new Error(t('blobNotConfigured'));
                 }
-                if (isLarge) {
-                    if (onProgress) onProgress(48);
-                    return uploadVideoViaChunkedServer(file, onProgress);
-                }
+                if (isLarge) throw error;
                 if (onProgress) onProgress(45);
                 if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                     try {
@@ -2826,7 +2875,7 @@
         }
 
         /** Poll /api/file-status until Gemini marks the file ACTIVE (ready for analyze). */
-        async function waitForGeminiFileReady(fileResourceName, signal) {
+        async function waitForGeminiFileReady(fileResourceName, signal, onProgress) {
             const name = String(fileResourceName || '').trim();
             if (!name) return;
             const statusBase = getBackendEndpointUrl('/api/file-status');
@@ -2836,6 +2885,11 @@
             while (Date.now() - started < 120000) {
                 if (delayMs) await sleep(delayMs);
                 delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 500;
+                if (onProgress) {
+                    const elapsed = Date.now() - started;
+                    const pct = 93 + Math.min(6, Math.round((elapsed / 120000) * 6));
+                    onProgress(pct);
+                }
                 const statusUrl = `${statusBase}?name=${encodeURIComponent(name)}`;
                 const statusRes = await fetch(statusUrl, { signal });
                 const meta = await statusRes.json().catch(() => ({}));
@@ -2995,21 +3049,17 @@
             }
 
             if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
-                if (onProgress) onProgress(10);
-                try {
-                    return await uploadVideoViaChunkedServer(file, onProgress);
-                } catch (chunkErr) {
-                    if (blobOk) {
-                        try {
-                            if (onProgress) onProgress(12);
-                            const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: CLIENT_BLOB_TRY_MS });
-                            return { videoBlobUrl: blob.url, fileUri: '', mimeType };
-                        } catch {
-                            throw chunkErr;
-                        }
+                if (blobOk) {
+                    try {
+                        if (onProgress) onProgress(6);
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
+                        return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                    } catch (blobErr) {
+                        console.warn('Large file Blob upload failed, trying Gemini chunks:', blobErr);
                     }
-                    throw chunkErr;
                 }
+                if (onProgress) onProgress(10);
+                return uploadVideoViaChunkedServer(file, onProgress);
             }
 
             if (blobOk) {
@@ -3251,7 +3301,7 @@
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = state.lang === 'ru' ? '⏫ Загрузка видео...' : '⏫ Uploading video...';
             const isLarge = file.size > VERCEL_FUNCTION_BODY_SAFE_BYTES;
             const largeHint = isLarge
-                ? (state.lang === 'ru' ? 'Большой файл — загрузка по частям, подожди… · ' : 'Large file — uploading in parts, please wait… · ')
+                ? (state.lang === 'ru' ? 'Большой файл — сначала в хранилище, затем анализ · ' : 'Large file — storage upload first, then analysis · ')
                 : '';
             videoFileMeta.textContent = largeHint
                 + (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
@@ -3260,24 +3310,29 @@
             let lastPctAt = Date.now();
             const stallGuard = setInterval(() => {
                 if (!state.uploadInProgress || state.selectedVideoFile !== file) return;
-                const stalled = Date.now() - lastPctAt > BLOB_STALL_SWITCH_MS
-                    && lastPct > 0 && lastPct < 50;
-                if (!stalled) return;
-                clearInterval(stallGuard);
-                console.warn('Upload appears stalled at', lastPct + '%, user may retry');
-            }, 5000);
+                const stallMs = Date.now() - lastPctAt;
+                if (stallMs < 45000 || lastPct <= 0) return;
+                const processingNote = state.lang === 'ru' ? t('uploadProcessingGemini') : t('uploadProcessingGemini');
+                if (lastPct >= 90 && stallMs > 20000) {
+                    if (analyzeBtnLabel) analyzeBtnLabel.textContent = '⏫ ' + processingNote;
+                    videoFileMeta.textContent = processingNote + ' · ' + file.name;
+                } else if (lastPct >= 70 && stallMs > 60000) {
+                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Долго на ' : 'Stuck at ')
+                        + lastPct + '% — ' + (state.lang === 'ru' ? 'подожди или обнови страницу' : 'wait or refresh');
+                }
+            }, 8000);
             try {
                 const uploadPromise = prepareVideoUpload(file, (pct) => {
                     lastPct = pct;
                     lastPctAt = Date.now();
                     if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
-                    const chunkNote = isLarge && pct >= 28 && pct < 100 && !isTelegramWebApp()
-                        ? (state.lang === 'ru' ? ' (8 МБ → Gemini)' : ' (8MB → Gemini)')
-                        : isLarge && isTelegramWebApp()
-                            ? (state.lang === 'ru' ? ' (Blob)' : ' (Blob)')
-                            : '';
+                    let statusNote = '';
+                    if (pct >= 93) statusNote = ' · ' + t('uploadProcessingGemini');
+                    else if (isLarge && pct >= 10 && pct < 93 && !isTelegramWebApp()) {
+                        statusNote = state.lang === 'ru' ? ' · хранилище/Gemini' : ' · storage/Gemini';
+                    } else if (isLarge && isTelegramWebApp()) statusNote = ' · Blob';
                     videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
-                        + pct + '%' + chunkNote + ' · ' + file.name + ' · ' + formatBytes(file.size);
+                        + pct + '%' + statusNote + ' · ' + file.name + ' · ' + formatBytes(file.size);
                 });
                 state.blobUploadPromise = uploadPromise;
                 const uploaded = await uploadPromise;
