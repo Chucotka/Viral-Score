@@ -2420,6 +2420,39 @@
             }
         }
 
+        /** Fallback when @vercel/blob/client cannot reach Blob CDN (e.g. Telegram WebView). Small files only. */
+        async function uploadVideoToBlobViaServer(file) {
+            const fileSize = Number(file?.size || 0);
+            if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                throw new Error(t('videoTooLargeForProxy'));
+            }
+            const putUrl = getBackendEndpointUrl('/api/blob/put');
+            if (!putUrl) throw new Error(t('blobUploadFailed'));
+            const mimeType = file.type || 'video/mp4';
+            const res = await fetch(putUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': mimeType,
+                    'X-Mime-Type': mimeType,
+                    'X-File-Name': (file.name || 'video.mp4').slice(0, 200)
+                },
+                body: file
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const err = String(data?.error || res.status);
+                if (/BLOB_READ_WRITE_TOKEN|not configured/i.test(err)) {
+                    throw new Error(t('blobNotConfigured'));
+                }
+                if (/payload.?too.?large|413|too large/i.test(err)) {
+                    throw new Error(t('videoTooLargeForProxy'));
+                }
+                throw new Error(data?.error || t('blobUploadFailed'));
+            }
+            if (!data?.url) throw new Error(t('blobUploadFailed'));
+            return { url: data.url };
+        }
+
         async function uploadVideoToBlob(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
             if (state.backendHealth && state.backendHealth.blobConfigured === false) {
@@ -2427,9 +2460,10 @@
             }
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
-            const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
-            try {
-                const result = await Promise.race([
+
+            const tryClientUpload = async () => {
+                const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
+                return Promise.race([
                     upload(file.name, file, {
                         access: 'public',
                         handleUploadUrl
@@ -2438,14 +2472,32 @@
                         setTimeout(() => reject(new Error(t('blobUploadFailed'))), NETWORK_TIMEOUT_MS);
                     })
                 ]);
-                if (!result?.url) {
-                    throw new Error(t('blobUploadFailed'));
-                }
+            };
+
+            try {
+                if (onProgress) onProgress(20);
+                const result = await tryClientUpload();
+                if (!result?.url) throw new Error(t('blobUploadFailed'));
+                if (onProgress) onProgress(100);
                 return result;
             } catch (error) {
                 const message = String(error?.message || '');
-                if (message.includes('client token') || message.includes('BLOB_READ_WRITE_TOKEN')) {
+                if (message.includes('BLOB_READ_WRITE_TOKEN') && message.includes('not configured')) {
                     throw new Error(t('blobNotConfigured'));
+                }
+                // Telegram / strict WebViews: retry via our server (small files only).
+                if (Number(file.size || 0) <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                    try {
+                        if (onProgress) onProgress(40);
+                        const fallback = await uploadVideoToBlobViaServer(file);
+                        if (onProgress) onProgress(100);
+                        return fallback;
+                    } catch (fallbackErr) {
+                        throw new Error(fallbackErr?.message || message || t('blobUploadFailed'));
+                    }
+                }
+                if (message.includes('client token')) {
+                    throw new Error(t('blobUploadFailed'));
                 }
                 throw new Error(message || t('blobUploadFailed'));
             }
