@@ -906,7 +906,7 @@ export default async function handler(req, res) {
       res.statusCode = 204;
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name, X-Upload-Url, X-Chunk-Offset, X-Goog-Upload-Command');
       return res.end();
     }
 
@@ -956,6 +956,55 @@ export default async function handler(req, res) {
       const uploadUrl = startRes.headers.get('x-goog-upload-url');
       if (!uploadUrl) return sendJson(res, 502, { error: 'Gemini did not return an upload URL.' });
       return sendJson(res, 200, { uploadUrl, mimeType, fileName });
+    }
+
+    // Proxy one chunk of a Gemini resumable upload (keeps browser off Google; each body < Vercel limit).
+    if (req.method === 'POST' && path === '/api/upload-chunk') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const uploadUrl = String(req.headers['x-upload-url'] || '').trim();
+      if (!uploadUrl) return sendJson(res, 400, { error: 'X-Upload-Url header is required.' });
+      const offset = Number(req.headers['x-chunk-offset'] || 0);
+      const command = String(req.headers['x-goog-upload-command'] || 'upload').trim();
+      const mimeType = String(req.headers['x-mime-type'] || req.headers['content-type'] || 'application/octet-stream').trim();
+      const CHUNK_MAX = 2.5 * 1024 * 1024;
+      const chunks = [];
+      await new Promise((resolve, reject) => {
+        req.on('data', c => chunks.push(c));
+        req.on('end', resolve);
+        req.on('error', reject);
+      });
+      const buffer = Buffer.concat(chunks);
+      if (!buffer.length) return sendJson(res, 400, { error: 'Empty chunk body.' });
+      if (buffer.length > CHUNK_MAX) {
+        return sendJson(res, 413, { error: 'Chunk too large. Use 2MB chunks.' });
+      }
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'X-Goog-Upload-Offset': String(offset),
+          'X-Goog-Upload-Command': command,
+          'Content-Length': String(buffer.length),
+          'Content-Type': mimeType
+        },
+        body: buffer
+      });
+      if (!uploadRes.ok) {
+        return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini chunk upload failed: ${uploadRes.status}`) });
+      }
+      const text = await uploadRes.text();
+      if (!text) return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
+      try {
+        const data = JSON.parse(text);
+        const uploadedFile = data.file || data;
+        const uploadName = uploadedFile?.name || data?.name;
+        if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
+          const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
+          return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });
+        }
+        return sendJson(res, 200, { file: uploadedFile, mimeType });
+      } catch {
+        return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
+      }
     }
 
     // Proxy video upload to Gemini — client POSTs raw video body here,
