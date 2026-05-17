@@ -1808,6 +1808,7 @@
                 invalidUrl: 'Please paste a valid URL.',
                 invalidText: 'Please paste the caption, transcript, or script.',
                 blobNotConfigured: 'Video uploads are not configured yet. Check the Blob upload endpoint and redeploy.',
+                videoTooLargeForProxy: 'This video is too large for direct server upload (Vercel 4.5MB limit). Use a smaller file, Quick mode, or paste a public video link instead.',
                 blobUploadFailed: 'Could not upload the video. Try a smaller file or a YouTube link.',
                 allModelsFailed: 'All Gemini models failed.',
                 copyMain: 'Copy hook',
@@ -1979,6 +1980,7 @@
                 invalidUrl: 'Вставь корректную ссылку.',
                 invalidText: 'Вставь caption, транскрипт или сценарий.',
                 blobNotConfigured: 'Загрузка видео ещё не настроена. Проверь Blob upload endpoint и сделай redeploy.',
+                videoTooLargeForProxy: 'Видео слишком большое для прямой загрузки на сервер (лимит Vercel 4.5 MB). Сожми файл, вставь публичную ссылку или используй режим Quick.',
                 blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
                 allModelsFailed: 'Все модели Gemini вернули ошибку.',
                 copyMain: 'Копировать хук',
@@ -2002,6 +2004,8 @@
             ? 'https://viral-score.vercel.app/api/analyze'
             : '/api/analyze';
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
+        /** Stay under Vercel serverless ~4.5MB request body limit (multipart overhead). */
+        const VERCEL_FUNCTION_BODY_SAFE_BYTES = 3 * 1024 * 1024;
         const NETWORK_TIMEOUT_MS = 120000;
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
         const ANALYSIS_TIMEOUT_MS = 299000;
@@ -2468,25 +2472,26 @@
             throw new Error(t('fileProcessTimeout'));
         }
 
-        /**
-         * Upload video through our backend (POST /api/upload-video).
-         * Avoids browser → Gemini CORS blocks in Telegram WebView and normal browsers.
-         */
-        async function uploadVideoViaGeminiSession(file, onProgress) {
+        /** Small files only — POST body must stay under Vercel ~4.5MB limit. */
+        async function uploadVideoViaServerProxy(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
+            const fileSize = Number(file?.size || 0);
+            if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                throw new Error(t('videoTooLargeForProxy'));
+            }
             const uploadUrl = getBackendEndpointUrl('/api/upload-video');
             if (!uploadUrl) throw new Error(t('backendRequired'));
             const mimeType = file.type || 'video/mp4';
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), GEMINI_UPLOAD_TIMEOUT_MS);
             try {
-                if (onProgress) onProgress(10);
+                if (onProgress) onProgress(15);
                 const uploadRes = await fetch(uploadUrl, {
                     method: 'POST',
                     headers: {
                         'Content-Type': mimeType,
                         'X-Mime-Type': mimeType,
-                        'X-File-Size': String(file.size || 0),
+                        'X-File-Size': String(fileSize),
                         'X-File-Name': (file.name || 'video.mp4').slice(0, 200)
                     },
                     body: file,
@@ -2494,25 +2499,28 @@
                 });
                 const uploadData = await uploadRes.json().catch(() => ({}));
                 if (!uploadRes.ok) {
+                    const errText = String(uploadData?.error || uploadRes.status);
+                    if (/payload.?too.?large|FUNCTION_PAYLOAD_TOO_LARGE/i.test(errText)) {
+                        throw new Error(t('videoTooLargeForProxy'));
+                    }
                     throw new Error(uploadData?.error || `Video upload failed: ${uploadRes.status}`);
                 }
-                if (onProgress) onProgress(70);
+                if (onProgress) onProgress(75);
                 const uploadedFile = uploadData?.file || uploadData;
                 const fileUri = uploadedFile?.uri || '';
                 const fileResourceName = uploadedFile?.name || '';
-                if (!fileUri) {
-                    throw new Error('Upload to Gemini failed — no file URI.');
-                }
+                if (!fileUri) throw new Error('Upload to Gemini failed — no file URI.');
                 if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
                     await waitForGeminiFileReady(fileResourceName, controller.signal);
                 }
                 if (onProgress) onProgress(100);
-                return { fileUri, mimeType: uploadData?.mimeType || mimeType, geminiFile: uploadedFile };
+                return { fileUri, mimeType: uploadData?.mimeType || mimeType, videoBlobUrl: '' };
             } catch (error) {
-                if (error?.name === 'AbortError') {
-                    throw new Error(t('analysisTimeout'));
-                }
+                if (error?.name === 'AbortError') throw new Error(t('analysisTimeout'));
                 const msg = String(error?.message || '');
+                if (/payload.?too.?large|FUNCTION_PAYLOAD_TOO_LARGE/i.test(msg)) {
+                    throw new Error(t('videoTooLargeForProxy'));
+                }
                 if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
                     throw new Error(t('blobUploadFailed'));
                 }
@@ -2520,6 +2528,28 @@
             } finally {
                 clearTimeout(timeout);
             }
+        }
+
+        /**
+         * Production: Vercel Blob (file bytes never hit serverless body) → videoBlobUrl on analyze.
+         * Fallback: server proxy only for files under VERCEL_FUNCTION_BODY_SAFE_BYTES.
+         */
+        async function prepareVideoUpload(file, onProgress) {
+            if (!file) throw new Error(t('chooseVideoFirst'));
+            const mimeType = file.type || 'video/mp4';
+            const blobOk = state.backendHealth?.blobConfigured !== false;
+            if (!isLocalBackendUrl() && blobOk) {
+                if (onProgress) onProgress(15);
+                const blob = await uploadVideoToBlob(file, onProgress);
+                if (onProgress) onProgress(100);
+                return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+            }
+            const fileSize = Number(file.size || 0);
+            if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                return uploadVideoViaServerProxy(file, onProgress);
+            }
+            if (!blobOk) throw new Error(t('blobNotConfigured'));
+            throw new Error(t('videoTooLargeForProxy'));
         }
 
         function getSourceLabel() {
@@ -2749,13 +2779,14 @@
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = state.lang === 'ru' ? '⏫ Загрузка видео...' : '⏫ Uploading video...';
             videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ') + file.name + ' · ' + formatBytes(file.size);
             try {
-                const uploadPromise = uploadVideoViaGeminiSession(file, (pct) => {
+                const uploadPromise = prepareVideoUpload(file, (pct) => {
                     if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
-                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка в Gemini... ' : 'Uploading to Gemini... ') + pct + '% · ' + file.name + ' · ' + formatBytes(file.size);
+                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ') + pct + '% · ' + file.name + ' · ' + formatBytes(file.size);
                 });
                 state.blobUploadPromise = uploadPromise;
                 const uploaded = await uploadPromise;
                 if (state.selectedVideoFile !== file) return;
+                state.uploadedVideoBlobUrl = uploaded.videoBlobUrl || '';
                 state.uploadedVideoFileUri = uploaded.fileUri || '';
                 state.uploadedVideoMimeType = uploaded.mimeType || file.type || 'video/mp4';
                 state.blobUploadPromise = null;
@@ -3759,16 +3790,21 @@
                             // Prefetch may fail; fall through to explicit upload.
                         }
                     }
+                    let blobUrl = state.uploadedVideoBlobUrl || '';
                     let fileUri = state.uploadedVideoFileUri || '';
                     let fileMimeType = state.uploadedVideoMimeType || state.selectedVideoFile?.type || 'video/mp4';
-                    if (!fileUri) {
-                        const uploaded = await uploadVideoViaGeminiSession(state.selectedVideoFile);
+                    if (!blobUrl && !fileUri) {
+                        const uploaded = await prepareVideoUpload(state.selectedVideoFile);
+                        blobUrl = uploaded.videoBlobUrl || '';
                         fileUri = uploaded.fileUri || '';
                         fileMimeType = uploaded.mimeType || fileMimeType;
+                        state.uploadedVideoBlobUrl = blobUrl;
                         state.uploadedVideoFileUri = fileUri;
                         state.uploadedVideoMimeType = fileMimeType;
                     }
-                    if (fileUri) {
+                    if (blobUrl) {
+                        formData.append('videoBlobUrl', blobUrl);
+                    } else if (fileUri) {
                         formData.append('fileUri', fileUri);
                         formData.append('fileMimeType', fileMimeType);
                     } else {
@@ -3908,7 +3944,7 @@
                         // Error surfaced below if fileUri still missing.
                     }
                 }
-                if (!state.uploadedVideoFileUri) {
+                if (!state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri) {
                     mainError.textContent = state.lang === 'ru'
                         ? 'Загрузка видео не завершилась. Выбери файл снова или дождись «Готово к анализу».'
                         : 'Video upload did not finish. Re-select the file or wait until it shows ready.';

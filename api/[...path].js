@@ -957,7 +957,14 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && path === '/api/upload-video') {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
       const mimeType = String(req.headers['x-mime-type'] || 'video/mp4').trim();
-      const fileSize = String(req.headers['x-file-size'] || '0');
+      const declaredSize = Number(req.headers['x-file-size'] || req.headers['content-length'] || 0);
+      const VERCEL_BODY_SAFE = 3 * 1024 * 1024;
+      if (declaredSize > VERCEL_BODY_SAFE) {
+        return sendJson(res, 413, {
+          error: 'Video is too large for direct upload (Vercel 4.5MB limit). Use client Blob upload and send videoBlobUrl to /api/analyze instead.'
+        });
+      }
+      const fileSize = String(declaredSize || '0');
       const fileName = String(req.headers['x-file-name'] || 'video.mp4').trim().slice(0, 200);
       // Step 1: start resumable upload session
       const startRes = await fetch(
