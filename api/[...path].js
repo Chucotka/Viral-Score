@@ -9,6 +9,14 @@ const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
 
 // Temporary store for Telegram video file_ids (clientId → {fileId, mimeType, ts})
 const tgVideoStore = new Map();
+// Gemini resumable upload URLs keyed by session id (avoids huge X-Upload-Url headers on /api/upload-chunk)
+const geminiUploadSessionStore = new Map();
+function storeGeminiUploadSession(sessionId, uploadUrl) {
+  geminiUploadSessionStore.set(sessionId, { uploadUrl, ts: Date.now() });
+  for (const [k, v] of geminiUploadSessionStore) {
+    if (Date.now() - v.ts > 60 * 60 * 1000) geminiUploadSessionStore.delete(k);
+  }
+}
 function storeTgVideo(clientId, fileId, mimeType) {
   tgVideoStore.set(clientId, { fileId, mimeType: mimeType || 'video/mp4', ts: Date.now() });
   // Clean up entries older than 30 minutes
@@ -906,7 +914,7 @@ export default async function handler(req, res) {
       res.statusCode = 204;
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name, X-Upload-Url, X-Chunk-Offset, X-Goog-Upload-Command');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name, X-Upload-Url, X-Upload-Session-Id, X-Chunk-Offset, X-Goog-Upload-Command');
       return res.end();
     }
 
@@ -955,14 +963,22 @@ export default async function handler(req, res) {
       }
       const uploadUrl = startRes.headers.get('x-goog-upload-url');
       if (!uploadUrl) return sendJson(res, 502, { error: 'Gemini did not return an upload URL.' });
-      return sendJson(res, 200, { uploadUrl, mimeType, fileName });
+      const sessionId = `up_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+      storeGeminiUploadSession(sessionId, uploadUrl);
+      return sendJson(res, 200, { uploadUrl, uploadSessionId: sessionId, mimeType, fileName });
     }
 
     // Proxy one chunk of a Gemini resumable upload (keeps browser off Google; each body < Vercel limit).
     if (req.method === 'POST' && path === '/api/upload-chunk') {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
-      const uploadUrl = String(req.headers['x-upload-url'] || '').trim();
-      if (!uploadUrl) return sendJson(res, 400, { error: 'X-Upload-Url header is required.' });
+      const sessionId = String(req.headers['x-upload-session-id'] || '').trim();
+      let uploadUrl = String(req.headers['x-upload-url'] || '').trim();
+      if (sessionId) {
+        const entry = geminiUploadSessionStore.get(sessionId);
+        if (!entry) return sendJson(res, 404, { error: 'Upload session expired. Start a new upload.' });
+        uploadUrl = entry.uploadUrl;
+      }
+      if (!uploadUrl) return sendJson(res, 400, { error: 'X-Upload-Session-Id or X-Upload-Url is required.' });
       const offset = Number(req.headers['x-chunk-offset'] || 0);
       const command = String(req.headers['x-goog-upload-command'] || 'upload').trim();
       const mimeType = String(req.headers['x-mime-type'] || req.headers['content-type'] || 'application/octet-stream').trim();
@@ -997,6 +1013,7 @@ export default async function handler(req, res) {
         const data = JSON.parse(text);
         const uploadedFile = data.file || data;
         const uploadName = uploadedFile?.name || data?.name;
+        if (sessionId) geminiUploadSessionStore.delete(sessionId);
         if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
           const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
           return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });

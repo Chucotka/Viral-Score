@@ -1810,7 +1810,7 @@
                 blobNotConfigured: 'Video uploads are not configured yet. Check the Blob upload endpoint and redeploy.',
                 videoTooLargeForProxy: 'This video is too large for direct server upload (Vercel 4.5MB limit). Use a smaller file, Quick mode, or paste a public video link instead.',
                 blobUploadFailed: 'Could not upload the video. Try a smaller file or a YouTube link.',
-                telegramLargeVideoHint: 'Uploading a large video in chunks… If this fails, send the video to the bot in chat or paste a public link.',
+                telegramLargeVideoHint: 'Uploading video to server…',
                 telegramLargeVideoBotFallback: 'Could not upload this file in the app. Send the video to the bot in chat, then tap Analyze — or paste a public video link.',
                 telegramNetworkError: 'Upload blocked in Telegram. Send the video to the bot in chat, use a link, or try a file under 3 MB.',
                 directUploadNetworkError: 'Browser blocked the direct upload to Google. Paste a public video link, use a smaller file, or open the app in a regular browser.',
@@ -1988,7 +1988,7 @@
                 blobNotConfigured: 'Загрузка видео ещё не настроена. Проверь Blob upload endpoint и сделай redeploy.',
                 videoTooLargeForProxy: 'Видео слишком большое для прямой загрузки на сервер (лимит Vercel 4.5 MB). Сожми файл, вставь публичную ссылку или используй режим Quick.',
                 blobUploadFailed: 'Не удалось загрузить видео в хранилище. Попробуй файл поменьше или YouTube-ссылку.',
-                telegramLargeVideoHint: 'Загружаем большое видео по частям… Если не получится — отправь боту в чат или вставь публичную ссылку.',
+                telegramLargeVideoHint: 'Загружаем видео на сервер…',
                 telegramLargeVideoBotFallback: 'Не удалось загрузить файл в приложении. Отправь видео боту в чат и нажми Analyze — или вставь публичную ссылку.',
                 telegramNetworkError: 'Загрузка в Telegram заблокирована. Отправь видео боту в чат, вставь ссылку или выбери файл до 3 МБ.',
                 directUploadNetworkError: 'Браузер заблокировал прямую загрузку в Google. Вставь публичную ссылку, сожми файл или открой приложение в обычном браузере.',
@@ -2575,7 +2575,7 @@
             }
         }
 
-        function postUploadChunkXhr(chunkBlob, uploadUrl, offset, command, mimeType) {
+        function postUploadChunkXhr(chunkBlob, uploadSessionId, offset, command, mimeType) {
             const chunkUrl = getBackendEndpointUrl('/api/upload-chunk');
             if (!chunkUrl) return Promise.reject(new Error(t('backendRequired')));
             return new Promise((resolve, reject) => {
@@ -2608,11 +2608,85 @@
                 };
                 xhr.open('POST', chunkUrl);
                 xhr.setRequestHeader('Content-Type', mimeType);
-                xhr.setRequestHeader('X-Upload-Url', uploadUrl);
+                xhr.setRequestHeader('X-Upload-Session-Id', uploadSessionId);
                 xhr.setRequestHeader('X-Chunk-Offset', String(offset));
                 xhr.setRequestHeader('X-Goog-Upload-Command', command);
                 xhr.setRequestHeader('X-Mime-Type', mimeType);
                 xhr.send(chunkBlob);
+            });
+        }
+
+        /** Full-file upload via dedicated /api/upload-edge (stable for 15MB+ in Telegram). */
+        function uploadVideoViaUploadEdge(file, onProgress) {
+            if (!file) return Promise.reject(new Error(t('chooseVideoFirst')));
+            const uploadUrl = getBackendEndpointUrl('/api/upload-edge');
+            if (!uploadUrl) return Promise.reject(new Error(t('backendRequired')));
+            const mimeType = file.type || 'video/mp4';
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const timeout = setTimeout(() => {
+                    xhr.abort();
+                    reject(new Error(t('analysisTimeout')));
+                }, GEMINI_UPLOAD_TIMEOUT_MS);
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable && onProgress) {
+                        const pct = 8 + Math.round((event.loaded / event.total) * 84);
+                        onProgress(Math.min(92, pct));
+                    }
+                };
+                xhr.onload = async () => {
+                    clearTimeout(timeout);
+                    try {
+                        const data = JSON.parse(xhr.responseText || '{}');
+                        if (xhr.status < 200 || xhr.status >= 300) {
+                            const errText = String(data?.error || xhr.status);
+                            if (/payload.?too.?large|FUNCTION_PAYLOAD_TOO_LARGE|413/i.test(errText)) {
+                                reject(new Error(t('videoTooLargeForProxy')));
+                                return;
+                            }
+                            reject(new Error(data?.error || t('blobUploadFailed')));
+                            return;
+                        }
+                        const uploadedFile = data?.file || data;
+                        const fileUri = uploadedFile?.uri || '';
+                        const fileResourceName = uploadedFile?.name || '';
+                        if (!fileUri) {
+                            reject(new Error(t('missingFileUri')));
+                            return;
+                        }
+                        if (onProgress) onProgress(94);
+                        if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
+                            try {
+                                await waitForGeminiFileReady(fileResourceName);
+                            } catch (waitErr) {
+                                reject(waitErr);
+                                return;
+                            }
+                        }
+                        if (onProgress) onProgress(100);
+                        resolve({
+                            fileUri,
+                            mimeType: data?.mimeType || mimeType,
+                            videoBlobUrl: ''
+                        });
+                    } catch {
+                        reject(new Error(t('blobUploadFailed')));
+                    }
+                };
+                xhr.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(isTelegramWebApp() ? t('telegramNetworkError') : t('blobUploadFailed')));
+                };
+                xhr.onabort = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(t('analysisTimeout')));
+                };
+                xhr.open('POST', uploadUrl);
+                xhr.setRequestHeader('Content-Type', mimeType);
+                xhr.setRequestHeader('X-Mime-Type', mimeType);
+                xhr.setRequestHeader('X-File-Size', String(file.size || 0));
+                xhr.setRequestHeader('X-File-Name', (file.name || 'video.mp4').slice(0, 200));
+                xhr.send(file);
             });
         }
 
@@ -2641,8 +2715,8 @@
                 if (!sessionRes.ok) {
                     throw new Error(sessionData?.error || `Upload session failed: ${sessionRes.status}`);
                 }
-                const uploadUrl = sessionData?.uploadUrl || '';
-                if (!uploadUrl) throw new Error(t('missingUploadUrl'));
+                const uploadSessionId = sessionData?.uploadSessionId || '';
+                if (!uploadSessionId) throw new Error(t('missingUploadUrl'));
                 stopUploadProgressTicker();
                 let offset = 0;
                 let lastPayload = null;
@@ -2655,7 +2729,7 @@
                         const pct = 35 + Math.round((offset / Math.max(fileSize, 1)) * 55);
                         onProgress(Math.min(92, pct));
                     }
-                    lastPayload = await postUploadChunkXhr(chunk, uploadUrl, offset, command, mimeType);
+                    lastPayload = await postUploadChunkXhr(chunk, uploadSessionId, offset, command, mimeType);
                     offset = end;
                 }
                 const uploadedFile = lastPayload?.file || lastPayload;
@@ -2681,7 +2755,15 @@
         /** Large files: browser → Gemini resumable URL (skips Vercel 4.5MB body limit). Not reliable in Telegram WebView. */
         async function uploadVideoDirectToGemini(file, onProgress) {
             if (isTelegramWebApp()) {
-                return uploadVideoViaChunkedServer(file, onProgress);
+                try {
+                    return await uploadVideoViaUploadEdge(file, onProgress);
+                } catch (edgeErr) {
+                    try {
+                        return await uploadVideoViaChunkedServer(file, onProgress);
+                    } catch {
+                        throw edgeErr;
+                    }
+                }
             }
             const sessionUrl = getBackendEndpointUrl('/api/upload-session');
             if (!sessionUrl) throw new Error(t('backendRequired'));
@@ -2890,8 +2972,8 @@
 
         /**
          * Production upload strategy:
-         * - Telegram: same-origin server only (XHR/blob put or bot import). Never browser→Google.
-         * - Browser: client Blob with 18s timeout, then fallbacks; large files may use direct Gemini.
+         * - Telegram: /api/upload-edge (15MB+), then chunked, then bot. Never browser→Google.
+         * - Browser: Blob client, then upload-edge / direct Gemini for large files.
          */
         async function prepareVideoUpload(file, onProgress) {
             if (!file) throw new Error(t('chooseVideoFirst'));
@@ -2925,29 +3007,48 @@
                     }
                 }
                 try {
-                    return await uploadVideoViaChunkedServer(file, onProgress);
-                } catch (chunkErr) {
+                    return await uploadVideoViaUploadEdge(file, onProgress);
+                } catch (edgeErr) {
                     try {
-                        return await importVideoFromTelegramBot(onProgress);
-                    } catch (botErr) {
-                        if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
-                            throw new Error(t('telegramLargeVideoBotFallback'));
+                        return await uploadVideoViaChunkedServer(file, onProgress);
+                    } catch (chunkErr) {
+                        try {
+                            return await importVideoFromTelegramBot(onProgress);
+                        } catch (botErr) {
+                            if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
+                                throw new Error(t('telegramLargeVideoBotFallback'));
+                            }
+                            throw edgeErr;
                         }
-                        throw chunkErr;
                     }
                 }
             }
 
             if (blobOk) {
                 if (onProgress) onProgress(10);
-                const blob = await uploadVideoToBlob(file, onProgress);
-                return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                try {
+                    const blob = await uploadVideoToBlob(file, onProgress);
+                    return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                } catch (blobErr) {
+                    if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                        try {
+                            return await uploadVideoViaUploadEdge(file, onProgress);
+                        } catch {
+                            throw blobErr;
+                        }
+                    }
+                    throw blobErr;
+                }
             }
 
             if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                 return uploadVideoViaServerProxy(file, onProgress);
             }
-            return uploadVideoDirectToGemini(file, onProgress);
+            try {
+                return await uploadVideoViaUploadEdge(file, onProgress);
+            } catch {
+                return uploadVideoDirectToGemini(file, onProgress);
+            }
         }
 
         function getSourceLabel() {
