@@ -35,7 +35,7 @@ async function downloadTgFile(fileId) {
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
 const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.0-flash'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -773,7 +773,8 @@ async function analyzeMultipart(formData) {
     };
   }
 
-  const data = sourceType === 'video-file'
+  const hasUploadedVideo = requestBody?.contents?.[0]?.parts?.some((p) => p.file_data?.file_uri);
+  const data = sourceType === 'video-file' || hasUploadedVideo
     ? await callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, language })
     : await callGemini(requestBody, mode, { isVideo: false });
   const finishReason = data?.candidates?.[0]?.finishReason;

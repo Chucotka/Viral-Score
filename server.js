@@ -14,6 +14,7 @@ const INDEX_PATH = path.join(__dirname, 'index.html');
 const CONTRACT_PATH = path.join(__dirname, 'BACKEND_CONTRACT.md');
 const STATE_PATH = path.join(__dirname, 'server-state.json');
 const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
 let serverStateCache = null;
 const ANALYSIS_SCHEMA = {
   type: 'object',
@@ -438,25 +439,29 @@ async function uploadVideoFromBlobUrl(videoUrl) {
   return { ...uploadedFile, mimeType };
 }
 
-async function callGemini(requestBody, mode = 'pro') {
-  const quick = mode === 'quick';
+async function callGemini(requestBody, mode = 'pro', options = {}) {
+  const isVideo = options.isVideo === true;
+  const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
-  const maxOutputTokens = quick ? 1536 : 2200;
+  const maxOutputTokens = isVideo ? 768 : (quick ? 1536 : 2200);
+  const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
   let lastError = null;
-  for (const model of MODEL_CANDIDATES) {
+  for (const model of models) {
+    const generationConfig = {
+      temperature,
+      topP: 0.92,
+      maxOutputTokens,
+      responseMimeType: 'application/json',
+      responseSchema: ANALYSIS_SCHEMA
+    };
+    if (isVideo) generationConfig.mediaResolution = 'LOW';
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...requestBody,
-        generationConfig: {
-          temperature,
-          topP: 0.92,
-          maxOutputTokens,
-          responseMimeType: 'application/json',
-          responseSchema: ANALYSIS_SCHEMA
-        }
+        generationConfig
       })
     });
     if (response.ok) {
@@ -635,7 +640,8 @@ async function analyzeMultipart(formData) {
     };
   }
 
-  const data = await callGemini(requestBody, mode);
+  const hasUploadedVideo = requestBody?.contents?.[0]?.parts?.some((p) => p.file_data?.file_uri);
+  const data = await callGemini(requestBody, mode, { isVideo: sourceType === 'video-file' || hasUploadedVideo });
   const finishReason = data?.candidates?.[0]?.finishReason;
   if (finishReason === 'MAX_TOKENS') {
     throw new Error('Gemini response was cut off.');
