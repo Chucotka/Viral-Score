@@ -2041,7 +2041,8 @@
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
         /** Separate /api/proxy-upload call (keeps /api/analyze under Vercel 300s limit). */
         const PROXY_UPLOAD_CLIENT_TIMEOUT_MS = 280000;
-        const ANALYSIS_TIMEOUT_MS = 299000;
+        /** /api/analyze only — prep (Blob→Gemini) runs in separate requests before this. */
+        const ANALYSIS_REQUEST_TIMEOUT_MS = 200000;
         let uploadProgressTickerId = null;
         const ANALYSIS_SCHEMA = {
             type: 'object',
@@ -2661,19 +2662,63 @@
             }
         }
 
+        function syncVideoAnalyzeButton() {
+            if (!analyzeBtn || state.currentSourceType !== 'video-file' || !state.selectedVideoFile) return;
+            if (state.uploadInProgress || state.blobUploadPromise) return;
+            const needsGemini = Boolean(state.uploadedVideoBlobUrl) && !state.uploadedVideoFileUri;
+            const preparing = needsGemini && Boolean(state.geminiTransferPromise);
+            if (preparing) {
+                analyzeBtn.disabled = true;
+                if (analyzeBtnLabel) {
+                    analyzeBtnLabel.textContent = state.lang === 'ru' ? 'Готовим AI...' : 'Preparing AI...';
+                }
+                if (videoFileMeta && state.selectedVideoFile) {
+                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Передаём в AI... ' : 'Sending to AI... ')
+                        + state.selectedVideoFile.name;
+                }
+                return;
+            }
+            if (needsGemini && !state.geminiTransferPromise) {
+                startBackgroundGeminiTransfer(
+                    state.uploadedVideoBlobUrl,
+                    state.uploadedVideoMimeType || state.selectedVideoFile?.type || 'video/mp4',
+                    state.selectedVideoFile?.name || 'video.mp4'
+                );
+                analyzeBtn.disabled = true;
+                if (analyzeBtnLabel) {
+                    analyzeBtnLabel.textContent = state.lang === 'ru' ? 'Готовим AI...' : 'Preparing AI...';
+                }
+                return;
+            }
+            analyzeBtn.disabled = false;
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+        }
+
         function startBackgroundGeminiTransfer(blobUrl, mimeType, fileName) {
             if (!blobUrl || state.uploadedVideoFileUri || isTelegramWebApp()) return;
+            syncVideoAnalyzeButton();
             state.geminiTransferPromise = ensureGeminiFileFromBlob(blobUrl, mimeType, fileName)
                 .then((result) => {
                     if (state.uploadedVideoBlobUrl === blobUrl) {
                         state.uploadedVideoFileUri = result.fileUri;
                         state.uploadedVideoMimeType = result.mimeType;
+                        if (videoFileMeta && state.selectedVideoFile) {
+                            videoFileMeta.textContent = (state.lang === 'ru' ? '✅ Готово к анализу — ' : '✅ Ready — ')
+                                + state.selectedVideoFile.name + ' · ' + formatBytes(state.selectedVideoFile.size);
+                        }
                     }
                     return result;
                 })
                 .catch((err) => {
                     console.warn('Background Blob→Gemini transfer failed:', err);
+                    if (state.uploadedVideoBlobUrl === blobUrl && videoFileMeta) {
+                        videoFileMeta.textContent = (state.lang === 'ru' ? '⚠️ AI: ' : '⚠️ AI: ') + (err.message || '');
+                    }
                     throw err;
+                })
+                .finally(() => {
+                    state.geminiTransferPromise = null;
+                    syncVideoAnalyzeButton();
                 });
         }
 
@@ -3624,14 +3669,19 @@
             }
         }
 
-        async function ensureGeminiUriReadyForAnalyze(fileUri) {
-            const name = geminiResourceFromUri(fileUri);
-            if (!name) return;
-            setLoadingStage(t('processing'), { creep: true, maxMs: 90000 });
-            try {
-                await waitForGeminiFileReady(name, null, null);
-            } catch (waitErr) {
-                console.warn('Gemini file not ACTIVE yet, trying analyze anyway:', waitErr);
+        async function waitForVideoAnalysisReady() {
+            if (state.currentSourceType !== 'video-file' || isLocalBackendUrl()) return;
+            if (state.uploadedVideoFileUri) return;
+            if (state.geminiTransferPromise) {
+                setLoadingStage(t('preparingGemini'), { creep: true, maxMs: PROXY_UPLOAD_CLIENT_TIMEOUT_MS });
+                try {
+                    await state.geminiTransferPromise;
+                } catch (err) {
+                    throw new Error(err?.message || t('videoTransferFailed'));
+                }
+            }
+            if (state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri) {
+                throw new Error(t('videoTransferFailed'));
             }
         }
 
@@ -3822,16 +3872,19 @@
                 analyzeBtn.disabled = false;
                 if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
                 videoFileMeta.textContent = (state.lang === 'ru' ? '✅ Готово к анализу — ' : '✅ Ready — ') + file.name + ' · ' + formatBytes(file.size);
+                syncVideoAnalyzeButton();
             } catch (err) {
                 if (state.selectedVideoFile !== file) return;
                 stopUploadProgressTicker();
                 state.blobUploadPromise = null;
+                state.geminiTransferPromise = null;
                 state.uploadInProgress = false;
                 analyzeBtn.disabled = false;
                 if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
                 const errText = err?.message || t('blobUploadFailed');
                 videoFileMeta.textContent = (state.lang === 'ru' ? '❌ Ошибка загрузки: ' : '❌ Upload error: ') + errText;
                 console.error('Video pre-upload failed:', err);
+                syncVideoAnalyzeButton();
             } finally {
                 clearInterval(stallGuard);
             }
@@ -4798,7 +4851,7 @@
             if (!state.backendUrl) throw new Error(t('backendRequired'));
             const formData = new FormData();
             const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
-            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > VERCEL_FUNCTION_BODY_SAFE_BYTES
+            const effectiveMode = state.currentSourceType === 'video-file' && !isLocalBackendUrl()
                 ? 'quick'
                 : state.currentMode;
             if (analysisId) formData.append('analysisId', analysisId);
@@ -4819,52 +4872,23 @@
                         try {
                             await state.blobUploadPromise;
                         } catch {
-                            // Prefetch may fail; fall through to explicit upload.
+                            // Prefetch may fail; fall through.
                         }
                     }
-                    let blobUrl = state.uploadedVideoBlobUrl || '';
-                    let fileUri = state.uploadedVideoFileUri || '';
-                    let fileMimeType = state.uploadedVideoMimeType || state.selectedVideoFile?.type || 'video/mp4';
-                    if (!blobUrl && !fileUri) {
-                        const uploaded = await prepareVideoUpload(state.selectedVideoFile);
-                        blobUrl = uploaded.videoBlobUrl || '';
-                        fileUri = uploaded.fileUri || '';
-                        fileMimeType = uploaded.mimeType || fileMimeType;
-                        state.uploadedVideoBlobUrl = blobUrl;
-                        state.uploadedVideoFileUri = fileUri;
-                        state.uploadedVideoMimeType = fileMimeType;
-                    }
-                    if (blobUrl && !fileUri && state.geminiTransferPromise) {
+                    if (state.geminiTransferPromise) {
                         try {
                             await state.geminiTransferPromise;
-                            fileUri = state.uploadedVideoFileUri || '';
-                            fileMimeType = state.uploadedVideoMimeType || fileMimeType;
                         } catch {
-                            // Fall through to explicit transfer.
+                            // waitForVideoAnalysisReady will throw if still missing fileUri.
                         }
                     }
-                    if (blobUrl && !fileUri) {
-                        setLoadingStage(t('preparingGemini'), { creep: true, maxMs: PROXY_UPLOAD_CLIENT_TIMEOUT_MS });
-                        const transferred = await ensureGeminiFileFromBlob(
-                            blobUrl,
-                            fileMimeType,
-                            state.selectedVideoFile?.name || 'video.mp4'
-                        );
-                        fileUri = transferred.fileUri;
-                        fileMimeType = transferred.mimeType;
-                        state.uploadedVideoFileUri = fileUri;
-                        state.uploadedVideoMimeType = fileMimeType;
+                    const fileUri = state.uploadedVideoFileUri || '';
+                    const fileMimeType = state.uploadedVideoMimeType || state.selectedVideoFile?.type || 'video/mp4';
+                    if (!fileUri) {
+                        throw new Error(state.uploadedVideoBlobUrl ? t('videoTransferFailed') : t('blobUploadFailed'));
                     }
-                    if (!fileUri && blobUrl) {
-                        throw new Error(t('videoTransferFailed'));
-                    }
-                    if (fileUri) {
-                        await ensureGeminiUriReadyForAnalyze(fileUri);
-                        formData.append('fileUri', fileUri);
-                        formData.append('fileMimeType', fileMimeType);
-                    } else {
-                        throw new Error(t('blobUploadFailed'));
-                    }
+                    formData.append('fileUri', fileUri);
+                    formData.append('fileMimeType', fileMimeType);
                 }
             }
             if (state.currentSourceType === 'video-url') {
@@ -4878,9 +4902,9 @@
                     : raw;
                 formData.append('text', body);
             }
-            setLoadingStage(t('analyzingVideo'), { creep: true, maxMs: ANALYSIS_TIMEOUT_MS });
+            setLoadingStage(t('analyzingVideo'), { creep: true, maxMs: ANALYSIS_REQUEST_TIMEOUT_MS });
             const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
+            const timeout = setTimeout(() => controller.abort(), ANALYSIS_REQUEST_TIMEOUT_MS);
             let response;
             try {
                 response = await fetch(state.backendUrl, {
@@ -4899,6 +4923,9 @@
             if (!response.ok) {
                 if (response.status === 402) {
                     throw new Error(await getApiError(response, getPaywallMessage()));
+                }
+                if (response.status === 504 || response.status === 524) {
+                    throw new Error(t('analysisTimeout'));
                 }
                 throw new Error(await getApiError(response, `Backend failed: ${response.status}`));
             }
@@ -4981,7 +5008,7 @@
 
             clearFieldErrors();
             const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
-            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > VERCEL_FUNCTION_BODY_SAFE_BYTES
+            const effectiveMode = state.currentSourceType === 'video-file' && !isLocalBackendUrl()
                 ? 'quick'
                 : state.currentMode;
             let prompt = buildAnalysisPayload('', effectiveMode);
@@ -5022,9 +5049,23 @@
                 return;
             }
 
+            try {
+                if (state.currentSourceType === 'video-file' && state.selectedVideoFile && !isLocalBackendUrl()) {
+                    if (state.blobUploadPromise) {
+                        try { await state.blobUploadPromise; } catch { /* handled below */ }
+                    }
+                    await waitForVideoAnalysisReady();
+                }
+            } catch (prepErr) {
+                mainError.textContent = prepErr?.message || t('videoTransferFailed');
+                mainError.style.display = 'block';
+                if (errorActions) errorActions.classList.remove('hidden');
+                return;
+            }
+
             startLoading(
                 state.currentSourceType === 'video-file'
-                    ? [t('preparingGemini'), t('analyzingVideo'), t('processing'), t('scoringHook'), t('writingRewrites')]
+                    ? [t('analyzingVideo'), t('scoringHook'), t('writingRewrites')]
                     : [t('collectingContext'), t('scoringHook'), t('measuringRetention'), t('writingRewrites')]
             );
 

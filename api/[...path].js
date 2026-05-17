@@ -35,6 +35,7 @@ async function downloadTgFile(fileId) {
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
 const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.0-flash', 'gemini-2.5-flash'];
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -521,20 +522,23 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
 }
 
 const GEMINI_GENERATE_TIMEOUT_MS = 90000;
+const GEMINI_VIDEO_GENERATE_TIMEOUT_MS = 100000;
 
-async function callGemini(requestBody, mode = 'pro') {
-  const quick = mode === 'quick';
+async function callGemini(requestBody, mode = 'pro', options = {}) {
+  const isVideo = options.isVideo === true;
+  const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
-  const maxOutputTokens = quick ? 1536 : 2200;
-  const models = quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES;
+  const maxOutputTokens = isVideo ? 1024 : (quick ? 1536 : 2200);
+  const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
+  const timeoutMs = isVideo ? GEMINI_VIDEO_GENERATE_TIMEOUT_MS : GEMINI_GENERATE_TIMEOUT_MS;
   let lastError = null;
   for (const model of models) {
     try {
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(GEMINI_GENERATE_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
           ...requestBody,
           generationConfig: {
@@ -550,7 +554,7 @@ async function callGemini(requestBody, mode = 'pro') {
       lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        lastError = new Error(`Model ${model} timed out after ${Math.round(GEMINI_GENERATE_TIMEOUT_MS / 1000)}s.`);
+        lastError = new Error(`Model ${model} timed out after ${Math.round(timeoutMs / 1000)}s.`);
         continue;
       }
       throw error;
@@ -657,22 +661,7 @@ async function analyzeMultipart(formData) {
     const videoBlobUrl = String(formData.get('videoBlobUrl') || '').trim();
     let uploadedFile = null;
     if (fileUri) {
-      const resource = geminiFileResourcePath(fileUri);
       uploadedFile = { uri: fileUri, mimeType: fileMimeType };
-      if (resource) {
-        const st = await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
-        if (st.ok) {
-          const meta = await st.json();
-          if (meta.state && meta.state !== 'ACTIVE') {
-            try {
-              const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta, 20000);
-              uploadedFile = { uri: ready.uri || fileUri, mimeType: fileMimeType || ready.mimeType };
-            } catch {
-              uploadedFile = { uri: fileUri, mimeType: fileMimeType };
-            }
-          }
-        }
-      }
     } else if (videoBlobUrl) {
       throw new Error('Video is still transferring to AI. Wait a moment and tap Analyze again.');
     } else if (video && typeof video !== 'string') {
@@ -742,7 +731,7 @@ async function analyzeMultipart(formData) {
     };
   }
 
-  const data = await callGemini(requestBody, mode);
+  const data = await callGemini(requestBody, mode, { isVideo: sourceType === 'video-file' });
   const finishReason = data?.candidates?.[0]?.finishReason;
   if (finishReason === 'MAX_TOKENS') {
     throw new Error('Gemini response was cut off.');
