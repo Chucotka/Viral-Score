@@ -2020,8 +2020,10 @@
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         /** Stay under Vercel serverless ~4.5MB request body limit (multipart overhead). */
         const VERCEL_FUNCTION_BODY_SAFE_BYTES = 3 * 1024 * 1024;
-        /** Gemini resumable uploads require non-final chunks to be a multiple of 8MB. */
+        /** Direct browser→Gemini: prefer 8MB non-final chunks when the network allows. */
         const GEMINI_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
+        /** Server-proxied chunks must stay under Vercel body limit (~2.5MB on API). */
+        const SERVER_UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024;
         const NETWORK_TIMEOUT_MS = 120000;
         /** Client → Blob CDN often hangs (UI stuck ~42%); fail fast and switch to chunked upload. */
         const CLIENT_BLOB_TRY_MS = 12000;
@@ -2587,6 +2589,60 @@
 
         const GEMINI_CHUNK_TIMEOUT_MS = 180000;
 
+        function xhrUploadChunkViaServer(chunkBlob, uploadSessionId, offset, command, mimeType, onChunkProgress) {
+            const chunkUrl = getBackendEndpointUrl('/api/upload-chunk');
+            if (!chunkUrl) return Promise.reject(new Error(t('backendRequired')));
+            return new Promise((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
+                const timeout = setTimeout(() => {
+                    xhr.abort();
+                    reject(new Error(t('analysisTimeout')));
+                }, GEMINI_CHUNK_TIMEOUT_MS);
+                xhr.upload.onprogress = (event) => {
+                    if (event.lengthComputable && onChunkProgress) {
+                        onChunkProgress(event.loaded, event.total);
+                    }
+                };
+                xhr.onload = () => {
+                    clearTimeout(timeout);
+                    try {
+                        if (xhr.status < 200 || xhr.status >= 300) {
+                            let errMsg = `Chunk proxy failed: ${xhr.status}`;
+                            try {
+                                const errJson = JSON.parse(xhr.responseText || '{}');
+                                errMsg = errJson?.error || errJson?.message || xhr.responseText || errMsg;
+                            } catch {
+                                if (xhr.responseText) errMsg = xhr.responseText.slice(0, 500);
+                            }
+                            reject(new Error(errMsg));
+                            return;
+                        }
+                        if (!xhr.responseText) {
+                            resolve({ ok: true });
+                            return;
+                        }
+                        resolve(JSON.parse(xhr.responseText));
+                    } catch {
+                        resolve({ ok: true });
+                    }
+                };
+                xhr.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(t('blobUploadFailed')));
+                };
+                xhr.onabort = () => {
+                    clearTimeout(timeout);
+                    reject(new Error(t('analysisTimeout')));
+                };
+                xhr.open('POST', chunkUrl);
+                xhr.setRequestHeader('x-upload-session-id', uploadSessionId);
+                xhr.setRequestHeader('x-chunk-offset', String(offset));
+                xhr.setRequestHeader('x-goog-upload-command', command);
+                xhr.setRequestHeader('x-mime-type', mimeType);
+                xhr.send(chunkBlob);
+            });
+        }
+
         function xhrGeminiChunkUpload(chunkBlob, geminiUploadUrl, offset, command, mimeType, onChunkProgress) {
             return new Promise((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
@@ -2638,7 +2694,47 @@
             });
         }
 
-        /** Browser → Gemini in 8MB steps (required chunk granularity). */
+        /** Browser → our API → Gemini (reliable when direct Google upload is blocked). */
+        async function uploadChunksViaServerProxy(file, uploadSessionId, mimeType, onProgress, signal) {
+            const fileSize = Number(file.size || 0);
+            let offset = 0;
+            let lastPayload = null;
+            const totalChunks = Math.max(1, Math.ceil(fileSize / SERVER_UPLOAD_CHUNK_BYTES));
+            let chunkIndex = 0;
+            while (offset < fileSize) {
+                const remaining = fileSize - offset;
+                const chunkSize = Math.min(SERVER_UPLOAD_CHUNK_BYTES, remaining);
+                const chunk = file.slice(offset, offset + chunkSize);
+                const command = offset + chunkSize >= fileSize ? 'upload, finalize' : 'upload';
+                const chunkStart = offset;
+                chunkIndex += 1;
+                if (onProgress) {
+                    onProgress(10 + Math.round(((chunkIndex - 1) / totalChunks) * 80));
+                }
+                lastPayload = await xhrUploadChunkViaServer(
+                    chunk, uploadSessionId, offset, command, mimeType,
+                    (loaded, total) => {
+                        if (!onProgress || !total) return;
+                        const uploaded = chunkStart + loaded;
+                        const pct = 10 + Math.round((uploaded / Math.max(fileSize, 1)) * 85);
+                        onProgress(Math.min(96, pct));
+                    }
+                );
+                offset += chunkSize;
+            }
+            const uploadedFile = lastPayload?.file || lastPayload;
+            const fileUri = uploadedFile?.uri || '';
+            const fileResourceName = uploadedFile?.name || '';
+            if (!fileUri) throw new Error(t('missingFileUri'));
+            if (onProgress) onProgress(97);
+            if (geminiFileNeedsProcessingWait(uploadedFile)) {
+                await waitForGeminiFileReady(fileResourceName, signal, onProgress);
+            }
+            if (onProgress) onProgress(100);
+            return { fileUri, mimeType, videoBlobUrl: '', geminiFile: uploadedFile };
+        }
+
+        /** Browser → Gemini in 8MB steps (fallback when server proxy fails). */
         async function uploadChunksDirectToGemini(file, geminiUploadUrl, mimeType, onProgress, signal) {
             const fileSize = Number(file.size || 0);
             let offset = 0;
@@ -2661,8 +2757,8 @@
                     (loaded, total) => {
                         if (!onProgress || !total) return;
                         const uploaded = chunkStart + loaded;
-                        const pct = 10 + Math.round((uploaded / Math.max(fileSize, 1)) * 82);
-                        onProgress(Math.min(92, pct));
+                        const pct = 10 + Math.round((uploaded / Math.max(fileSize, 1)) * 85);
+                        onProgress(Math.min(96, pct));
                     }
                 );
                 offset += chunkSize;
@@ -2782,10 +2878,24 @@
                     throw new Error(sessionData?.error || `Upload session failed: ${sessionRes.status}`);
                 }
                 const geminiUploadUrl = sessionData?.uploadUrl || '';
-                if (!geminiUploadUrl) throw new Error(t('missingUploadUrl'));
-                const result = await uploadChunksDirectToGemini(
-                    file, geminiUploadUrl, mimeType, onProgress, controller.signal
-                );
+                const uploadSessionId = sessionData?.uploadSessionId || '';
+                if (!uploadSessionId && !geminiUploadUrl) throw new Error(t('missingUploadUrl'));
+                let result = null;
+                if (uploadSessionId) {
+                    try {
+                        result = await uploadChunksViaServerProxy(
+                            file, uploadSessionId, mimeType, onProgress, controller.signal
+                        );
+                    } catch (proxyErr) {
+                        console.warn('Server chunk proxy failed, trying direct Gemini:', proxyErr);
+                    }
+                }
+                if (!result) {
+                    if (!geminiUploadUrl) throw new Error(t('missingUploadUrl'));
+                    result = await uploadChunksDirectToGemini(
+                        file, geminiUploadUrl, mimeType, onProgress, controller.signal
+                    );
+                }
                 if (onProgress) onProgress(100);
                 return result;
             } catch (error) {
@@ -2830,15 +2940,12 @@
             const blobTimeoutMs = options.timeoutMs
                 || (isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : CLIENT_BLOB_TRY_MS);
 
-            const tryClientUpload = async () => {
-                const upload = await loadBlobClientUpload();
-                return Promise.race([
-                    upload(file.name, file, { access: 'public', handleUploadUrl }),
-                    new Promise((_, reject) => {
-                        setTimeout(() => reject(new Error('CLIENT_BLOB_TIMEOUT')), blobTimeoutMs);
-                    })
-                ]);
-            };
+            const tryClientUpload = () => Promise.race([
+                loadBlobClientUpload().then((upload) => upload(file.name, file, { access: 'public', handleUploadUrl })),
+                new Promise((_, reject) => {
+                    setTimeout(() => reject(new Error('CLIENT_BLOB_TIMEOUT')), blobTimeoutMs);
+                })
+            ]);
 
             const fileSize = Number(file.size || 0);
             const isLarge = fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES;
@@ -2848,9 +2955,9 @@
             let blobPulsePct = 8;
             if (isLarge && onProgress) {
                 blobPulseId = setInterval(() => {
-                    blobPulsePct = Math.min(92, blobPulsePct + 1);
+                    blobPulsePct = Math.min(70, blobPulsePct + 1);
                     onProgress(blobPulsePct);
-                }, 2000);
+                }, 1500);
             }
             try {
                 const result = await tryClientUpload();
@@ -3066,17 +3173,19 @@
             }
 
             if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
-                if (blobOk) {
+                if (isTelegramWebApp() && blobOk) {
                     try {
                         if (onProgress) onProgress(6);
-                        const blobTimeout = isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : BLOB_STALL_SWITCH_MS;
-                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: blobTimeout });
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
                         return { videoBlobUrl: blob.url, fileUri: '', mimeType };
                     } catch (blobErr) {
-                        console.warn('Large file Blob upload failed, trying Gemini chunks:', blobErr);
+                        console.warn('Telegram large Blob upload failed, trying chunks:', blobErr);
                     }
                 }
-                if (onProgress) onProgress(10);
+                if (onProgress) {
+                    onProgress(8);
+                    if (!isTelegramWebApp()) onProgress(12);
+                }
                 return uploadVideoViaChunkedServer(file, onProgress);
             }
 
