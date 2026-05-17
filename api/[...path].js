@@ -287,14 +287,14 @@ function extractClientIdFromPayload(payload) {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Poll Gemini file state: immediate first check, then backoff up to ~2.8s (faster than fixed 2s). */
-async function waitGeminiFileProcessed(uploadName, mimeType, partial = {}) {
+async function waitGeminiFileProcessed(uploadName, mimeType, partial = {}, maxWaitMs = 120000) {
   let state = partial.state || 'ACTIVE';
   if (!uploadName || state === 'ACTIVE') {
     return { ...partial, mimeType: mimeType || partial.mimeType, state: 'ACTIVE' };
   }
   const started = Date.now();
   let delayMs = 0;
-  while (Date.now() - started < 120000) {
+  while (Date.now() - started < maxWaitMs) {
     if (delayMs) await sleep(delayMs);
     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
     const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
@@ -388,32 +388,30 @@ async function uploadVideoFile(file) {
   return { ...uploadedFile, mimeType: fileType };
 }
 
-// Stream a video directly from a URL (e.g. Vercel Blob) to Gemini without buffering in memory
-async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
-  const waitForActive = options.waitForActive !== false;
-  // Download into Buffer first — streaming via duplex:half hangs in Vercel runtime
-  const videoResponse = await fetch(videoUrl);
-  if (!videoResponse.ok) throw new Error(`Could not fetch video from storage: ${videoResponse.status}`);
-  const arrayBuffer = await videoResponse.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  const contentLength = String(buffer.length);
-  const ct = videoResponse.headers.get('content-type') || 'video/mp4';
-  const mimeType = ct === 'application/octet-stream'
-    ? (videoUrl.toLowerCase().includes('.mov') ? 'video/quicktime'
-      : videoUrl.toLowerCase().includes('.webm') ? 'video/webm'
-      : 'video/mp4')
-    : ct.split(';')[0].trim() || 'video/mp4';
-  const fileName = (() => {
-    try { return new URL(videoUrl).pathname.split('/').filter(Boolean).pop() || 'video.mp4'; }
-    catch { return 'video.mp4'; }
-  })();
+const BLOB_TO_GEMINI_CHUNK_BYTES = 8 * 1024 * 1024;
+
+function inferMimeTypeFromBlobUrl(videoUrl, contentTypeHeader = '') {
+  const ct = contentTypeHeader || 'video/mp4';
+  if (ct !== 'application/octet-stream') return ct.split(';')[0].trim() || 'video/mp4';
+  const lower = videoUrl.toLowerCase();
+  if (lower.includes('.mov')) return 'video/quicktime';
+  if (lower.includes('.webm')) return 'video/webm';
+  return 'video/mp4';
+}
+
+function displayNameFromBlobUrl(videoUrl) {
+  try { return new URL(videoUrl).pathname.split('/').filter(Boolean).pop() || 'video.mp4'; }
+  catch { return 'video.mp4'; }
+}
+
+async function startGeminiResumableUpload(fileName, mimeType, contentLength) {
   const startResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
     method: 'POST',
     headers: {
       'x-goog-api-key': GEMINI_API_KEY,
       'X-Goog-Upload-Protocol': 'resumable',
       'X-Goog-Upload-Command': 'start',
-      'X-Goog-Upload-Header-Content-Length': contentLength,
+      'X-Goog-Upload-Header-Content-Length': String(contentLength),
       'X-Goog-Upload-Header-Content-Type': mimeType,
       'Content-Type': 'application/json'
     },
@@ -424,12 +422,88 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
   }
   const uploadUrl = startResponse.headers.get('x-goog-upload-url');
   if (!uploadUrl) throw new Error('Gemini did not return an upload URL.');
+  return uploadUrl;
+}
+
+async function uploadVideoFromBlobUrlChunked(videoUrl, totalSize, mimeType, fileName, options = {}) {
+  const waitForActive = options.waitForActive !== false;
+  const maxWaitMs = Number(options.maxWaitMs) || 90000;
+  const uploadUrl = await startGeminiResumableUpload(fileName, mimeType, totalSize);
+  let offset = 0;
+  let uploadedFile = null;
+  while (offset < totalSize) {
+    const end = Math.min(offset + BLOB_TO_GEMINI_CHUNK_BYTES - 1, totalSize - 1);
+    const rangeRes = await fetch(videoUrl, { headers: { Range: `bytes=${offset}-${end}` } });
+    if (!rangeRes.ok && rangeRes.status !== 206) {
+      throw new Error(`Could not read video chunk from storage: ${rangeRes.status}`);
+    }
+    const chunk = Buffer.from(await rangeRes.arrayBuffer());
+    const isLast = end >= totalSize - 1;
+    const command = isLast ? 'upload, finalize' : 'upload';
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Offset': String(offset),
+        'X-Goog-Upload-Command': command,
+        'Content-Length': String(chunk.length)
+      },
+      body: chunk
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(await getApiError(uploadResponse, `File upload to Gemini failed: ${uploadResponse.status}`));
+    }
+    if (isLast) {
+      const text = await uploadResponse.text();
+      if (text) {
+        const uploadData = JSON.parse(text);
+        uploadedFile = uploadData.file || uploadData;
+      }
+    }
+    offset = end + 1;
+  }
+  if (!uploadedFile?.uri) throw new Error('Missing file URI from Gemini after Blob upload.');
+  const uploadName = uploadedFile.name;
+  if (waitForActive && uploadName && uploadedFile.state !== 'ACTIVE') {
+    return waitGeminiFileProcessed(uploadName, mimeType, uploadedFile, maxWaitMs);
+  }
+  return { ...uploadedFile, mimeType };
+}
+
+/** Blob/CDN URL → Gemini (chunked when size known; keeps /api/analyze under Vercel maxDuration). */
+async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
+  const waitForActive = options.waitForActive !== false;
+  const maxWaitMs = Number(options.maxWaitMs) || 90000;
+  const fileName = displayNameFromBlobUrl(videoUrl);
+  let mimeType = 'video/mp4';
+  let totalSize = 0;
+  try {
+    const headRes = await fetch(videoUrl, { method: 'HEAD' });
+    if (headRes.ok) {
+      totalSize = Number(headRes.headers.get('content-length') || 0);
+      mimeType = inferMimeTypeFromBlobUrl(videoUrl, headRes.headers.get('content-type') || '');
+    }
+  } catch {
+    // HEAD may be blocked; fall back to full download below.
+  }
+  if (totalSize > BLOB_TO_GEMINI_CHUNK_BYTES) {
+    try {
+      return await uploadVideoFromBlobUrlChunked(videoUrl, totalSize, mimeType, fileName, { waitForActive, maxWaitMs });
+    } catch (chunkErr) {
+      console.warn('Chunked Blob→Gemini failed, trying single request:', chunkErr?.message || chunkErr);
+    }
+  }
+  const videoResponse = await fetch(videoUrl);
+  if (!videoResponse.ok) throw new Error(`Could not fetch video from storage: ${videoResponse.status}`);
+  mimeType = inferMimeTypeFromBlobUrl(videoUrl, videoResponse.headers.get('content-type') || mimeType);
+  const buffer = Buffer.from(await videoResponse.arrayBuffer());
+  const contentLength = buffer.length;
+  const uploadUrl = await startGeminiResumableUpload(fileName, mimeType, contentLength);
   const uploadResponse = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
       'X-Goog-Upload-Offset': '0',
       'X-Goog-Upload-Command': 'upload, finalize',
-      'Content-Length': contentLength
+      'Content-Length': String(contentLength)
     },
     body: buffer
   });
@@ -439,9 +513,9 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
   const uploadData = await uploadResponse.json();
   const uploadedFile = uploadData.file || uploadData;
   const uploadName = uploadedFile.name || uploadData.name;
-  let fileState = uploadedFile.state || 'ACTIVE';
+  const fileState = uploadedFile.state || 'ACTIVE';
   if (waitForActive && uploadName && fileState !== 'ACTIVE') {
-    return waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
+    return waitGeminiFileProcessed(uploadName, mimeType, uploadedFile, maxWaitMs);
   }
   return { ...uploadedFile, mimeType };
 }
@@ -578,14 +652,13 @@ async function analyzeMultipart(formData) {
         if (st.ok) {
           const meta = await st.json();
           if (meta.state && meta.state !== 'ACTIVE') {
-            const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta);
+            const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta, 45000);
             uploadedFile = { uri: ready.uri || fileUri, mimeType: fileMimeType || ready.mimeType };
           }
         }
       }
     } else if (videoBlobUrl) {
-      // Stream from Vercel Blob to Gemini
-      uploadedFile = await uploadVideoFromBlobUrl(videoBlobUrl);
+      uploadedFile = await uploadVideoFromBlobUrl(videoBlobUrl, { waitForActive: false, maxWaitMs: 45000 });
     } else if (video && typeof video !== 'string') {
       // Last resort: file in formdata (limited to 4.5MB)
       uploadedFile = await uploadVideoFile(video);
@@ -604,7 +677,7 @@ async function analyzeMultipart(formData) {
     const normalizedUrl = normalizePasteableLink(url);
     if (normalizedUrl && isDirectVideoUrl(normalizedUrl)) {
       try {
-        const uploadedFile = await uploadVideoFromBlobUrl(normalizedUrl);
+        const uploadedFile = await uploadVideoFromBlobUrl(normalizedUrl, { waitForActive: false, maxWaitMs: 45000 });
         if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI from direct video URL.');
         requestBody = {
           contents: [{

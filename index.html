@@ -1785,6 +1785,7 @@
                 noCta: 'No CTA suggestion returned.',
                 copied: '✓ Copied',
                 uploadStart: 'Uploading video...',
+                preparingGemini: 'Preparing video for AI (one-time transfer)...',
                 processing: 'Waiting for processing...',
                 scoringHook: 'Scoring hook...',
                 writingRewrites: 'Writing rewrites...',
@@ -1964,6 +1965,7 @@
                 noCta: 'Gemini не вернул CTA.',
                 copied: '✓ Скопировано',
                 uploadStart: 'Загружаем видео...',
+                preparingGemini: 'Готовим видео для AI (разовая передача)...',
                 processing: 'Ждём обработку...',
                 scoringHook: 'Оцениваем хук...',
                 writingRewrites: 'Пишем улучшения...',
@@ -2033,8 +2035,8 @@
         const BLOB_STALL_SWITCH_MS = 15000;
         const CHUNK_UPLOAD_STALL_MS = 45000;
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
-        /** Browser prefetch: don't block on Blob→Gemini proxy (analyze uploads server-side). */
-        const PROXY_UPLOAD_CLIENT_TIMEOUT_MS = 90000;
+        /** Separate /api/proxy-upload call (keeps /api/analyze under Vercel 300s limit). */
+        const PROXY_UPLOAD_CLIENT_TIMEOUT_MS = 280000;
         const ANALYSIS_TIMEOUT_MS = 299000;
         let uploadProgressTickerId = null;
         const ANALYSIS_SCHEMA = {
@@ -2151,6 +2153,7 @@
             uploadedVideoFileUri: '',
             uploadedVideoMimeType: '',
             blobUploadPromise: null,
+            geminiTransferPromise: null,
             uploadInProgress: false,
             loadingInterval: null,
             loadingMessages: [],
@@ -2620,16 +2623,67 @@
             }
         }
 
+        /** Blob → Gemini in its own API call so /api/analyze stays under 300s. */
+        async function ensureGeminiFileFromBlob(blobUrl, mimeType, fileName) {
+            const proxyUrl = getBackendEndpointUrl('/api/proxy-upload');
+            if (!proxyUrl) throw new Error(t('backendRequired'));
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), PROXY_UPLOAD_CLIENT_TIMEOUT_MS);
+            try {
+                const res = await fetch(proxyUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal,
+                    body: JSON.stringify({
+                        blobUrl,
+                        mimeType: mimeType || 'video/mp4',
+                        fileName: fileName || 'video.mp4'
+                    })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data?.error || `proxy-upload failed: ${res.status}`);
+                const uploadedFile = data?.file || data;
+                const fileUri = uploadedFile?.uri || '';
+                if (!fileUri) throw new Error(t('missingFileUri'));
+                return {
+                    fileUri,
+                    mimeType: data?.mimeType || uploadedFile?.mimeType || mimeType || 'video/mp4'
+                };
+            } catch (error) {
+                if (error?.name === 'AbortError') throw new Error(t('analysisTimeout'));
+                throw error;
+            } finally {
+                clearTimeout(timeout);
+            }
+        }
+
+        function startBackgroundGeminiTransfer(blobUrl, mimeType, fileName) {
+            if (!blobUrl || state.uploadedVideoFileUri || isTelegramWebApp()) return;
+            state.geminiTransferPromise = ensureGeminiFileFromBlob(blobUrl, mimeType, fileName)
+                .then((result) => {
+                    if (state.uploadedVideoBlobUrl === blobUrl) {
+                        state.uploadedVideoFileUri = result.fileUri;
+                        state.uploadedVideoMimeType = result.mimeType;
+                    }
+                    return result;
+                })
+                .catch((err) => {
+                    console.warn('Background Blob→Gemini transfer failed:', err);
+                    throw err;
+                });
+        }
+
         async function finishBlobUpload(file, blobResult, onProgress) {
             if (!blobResult?.url) throw new Error(t('blobUploadFailed'));
-            // Website: Blob is enough for prefetch — Gemini upload runs during /api/analyze (avoids 88% hang).
             if (!isTelegramWebApp()) {
                 if (onProgress) onProgress(100);
-                return {
+                const result = {
                     videoBlobUrl: blobResult.url,
                     fileUri: '',
                     mimeType: file.type || 'video/mp4'
                 };
+                startBackgroundGeminiTransfer(result.videoBlobUrl, result.mimeType, file.name || 'video.mp4');
+                return result;
             }
             try {
                 return await completeBlobUploadToGemini(
@@ -3641,6 +3695,7 @@
             state.uploadedVideoFileUri = '';
             state.uploadedVideoMimeType = '';
             state.blobUploadPromise = null;
+            state.geminiTransferPromise = null;
             state.uploadInProgress = false;
             analyzeBtn.disabled = false;
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
@@ -3661,6 +3716,7 @@
             state.uploadedVideoFileUri = '';
             state.uploadedVideoMimeType = '';
             state.blobUploadPromise = null;
+            state.geminiTransferPromise = null;
             state.uploadInProgress = false;
             if (state.selectedVideoObjectUrl) URL.revokeObjectURL(state.selectedVideoObjectUrl);
             state.selectedVideoObjectUrl = URL.createObjectURL(file);
@@ -4735,11 +4791,32 @@
                         state.uploadedVideoFileUri = fileUri;
                         state.uploadedVideoMimeType = fileMimeType;
                     }
-                    if (blobUrl) {
-                        formData.append('videoBlobUrl', blobUrl);
-                    } else if (fileUri) {
+                    if (blobUrl && !fileUri && state.geminiTransferPromise) {
+                        try {
+                            await state.geminiTransferPromise;
+                            fileUri = state.uploadedVideoFileUri || '';
+                            fileMimeType = state.uploadedVideoMimeType || fileMimeType;
+                        } catch {
+                            // Fall through to explicit transfer.
+                        }
+                    }
+                    if (blobUrl && !fileUri) {
+                        if (loadingTextElement) loadingTextElement.textContent = t('preparingGemini');
+                        const transferred = await ensureGeminiFileFromBlob(
+                            blobUrl,
+                            fileMimeType,
+                            state.selectedVideoFile?.name || 'video.mp4'
+                        );
+                        fileUri = transferred.fileUri;
+                        fileMimeType = transferred.mimeType;
+                        state.uploadedVideoFileUri = fileUri;
+                        state.uploadedVideoMimeType = fileMimeType;
+                    }
+                    if (fileUri) {
                         formData.append('fileUri', fileUri);
                         formData.append('fileMimeType', fileMimeType);
+                    } else if (blobUrl) {
+                        formData.append('videoBlobUrl', blobUrl);
                     } else {
                         throw new Error(t('blobUploadFailed'));
                     }
