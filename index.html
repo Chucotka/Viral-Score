@@ -2021,8 +2021,9 @@
         /** Chunk size for JSON upload-chunk (base64 ~33% overhead; stay under Vercel 4.5MB). */
         const UPLOAD_CHUNK_BYTES = Math.floor(1.5 * 1024 * 1024);
         const NETWORK_TIMEOUT_MS = 120000;
-        /** Client → Blob CDN often hangs in Telegram; fail fast and use server fallback. */
-        const CLIENT_BLOB_TRY_MS = 18000;
+        /** Client → Blob CDN often hangs (UI stuck ~42%); fail fast and switch to chunked upload. */
+        const CLIENT_BLOB_TRY_MS = 12000;
+        const BLOB_STALL_SWITCH_MS = 15000;
         const GEMINI_UPLOAD_TIMEOUT_MS = 300000;
         const ANALYSIS_TIMEOUT_MS = 299000;
         let uploadProgressTickerId = null;
@@ -2848,7 +2849,9 @@
                 ]);
             };
 
-            startUploadProgressTicker(onProgress, 18, 42);
+            const fileSize = Number(file.size || 0);
+            const isLarge = fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES;
+            startUploadProgressTicker(onProgress, 12, isLarge ? 88 : 42);
             try {
                 const result = await tryClientUpload();
                 stopUploadProgressTicker();
@@ -2861,8 +2864,12 @@
                 if (message.includes('BLOB_READ_WRITE_TOKEN') && message.includes('not configured')) {
                     throw new Error(t('blobNotConfigured'));
                 }
+                if (isLarge) {
+                    if (onProgress) onProgress(48);
+                    return uploadVideoViaChunkedServer(file, onProgress);
+                }
                 if (onProgress) onProgress(45);
-                if (Number(file.size || 0) <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                     try {
                         const fallback = await uploadVideoToBlobViaServer(file, onProgress);
                         if (onProgress) onProgress(100);
@@ -2995,7 +3002,23 @@
             if (isTelegramWebApp()) {
                 if (onProgress) onProgress(8);
                 let lastErr = null;
-                if (blobOk) {
+                if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                    try {
+                        return await uploadVideoViaChunkedServer(file, onProgress);
+                    } catch (e) {
+                        lastErr = e;
+                        console.warn('Telegram chunked upload failed:', e);
+                    }
+                    if (blobOk) {
+                        try {
+                            if (onProgress) onProgress(12);
+                            const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: CLIENT_BLOB_TRY_MS });
+                            return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                        } catch (e) {
+                            lastErr = e;
+                        }
+                    }
+                } else if (blobOk) {
                     try {
                         const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
                         return { videoBlobUrl: blob.url, fileUri: '', mimeType };
@@ -3017,17 +3040,7 @@
                         }
                     }
                 }
-                try {
-                    return await uploadVideoViaChunkedServer(file, onProgress);
-                } catch (chunkErr) {
-                    lastErr = chunkErr;
-                    if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
-                        try {
-                            return await uploadVideoViaUploadEdge(file, onProgress);
-                        } catch (edgeErr) {
-                            lastErr = edgeErr;
-                        }
-                    }
+                if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES && lastErr) {
                     try {
                         return await importVideoFromTelegramBot(onProgress);
                     } catch (botErr) {
@@ -3040,33 +3053,37 @@
                         throw lastErr || botErr;
                     }
                 }
+                if (lastErr) throw lastErr;
+            }
+
+            if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                if (onProgress) onProgress(10);
+                try {
+                    return await uploadVideoViaChunkedServer(file, onProgress);
+                } catch (chunkErr) {
+                    if (blobOk) {
+                        try {
+                            if (onProgress) onProgress(12);
+                            const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: CLIENT_BLOB_TRY_MS });
+                            return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                        } catch {
+                            throw chunkErr;
+                        }
+                    }
+                    throw chunkErr;
+                }
             }
 
             if (blobOk) {
                 if (onProgress) onProgress(10);
-                try {
-                    const blob = await uploadVideoToBlob(file, onProgress);
-                    return { videoBlobUrl: blob.url, fileUri: '', mimeType };
-                } catch (blobErr) {
-                    if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
-                        try {
-                            return await uploadVideoViaUploadEdge(file, onProgress);
-                        } catch {
-                            throw blobErr;
-                        }
-                    }
-                    throw blobErr;
-                }
+                const blob = await uploadVideoToBlob(file, onProgress);
+                return { videoBlobUrl: blob.url, fileUri: '', mimeType };
             }
 
             if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                 return uploadVideoViaServerProxy(file, onProgress);
             }
-            try {
-                return await uploadVideoViaUploadEdge(file, onProgress);
-            } catch {
-                return uploadVideoDirectToGemini(file, onProgress);
-            }
+            return uploadVideoViaChunkedServer(file, onProgress);
         }
 
         function getSourceLabel() {
@@ -3294,14 +3311,33 @@
             state.uploadInProgress = true;
             analyzeBtn.disabled = true;
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = state.lang === 'ru' ? '⏫ Загрузка видео...' : '⏫ Uploading video...';
-            const largeTg = isTelegramWebApp() && file.size > VERCEL_FUNCTION_BODY_SAFE_BYTES;
-            videoFileMeta.textContent = (largeTg ? `ℹ️ ${t('telegramLargeVideoHint')} · ` : '')
+            const isLarge = file.size > VERCEL_FUNCTION_BODY_SAFE_BYTES;
+            const largeHint = isLarge
+                ? (state.lang === 'ru' ? 'Большой файл — загрузка по частям, подожди… · ' : 'Large file — uploading in parts, please wait… · ')
+                : '';
+            videoFileMeta.textContent = largeHint
                 + (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
                 + file.name + ' · ' + formatBytes(file.size);
+            let lastPct = 0;
+            let lastPctAt = Date.now();
+            const stallGuard = setInterval(() => {
+                if (!state.uploadInProgress || state.selectedVideoFile !== file) return;
+                const stalled = Date.now() - lastPctAt > BLOB_STALL_SWITCH_MS
+                    && lastPct > 0 && lastPct < 50;
+                if (!stalled) return;
+                clearInterval(stallGuard);
+                console.warn('Upload appears stalled at', lastPct + '%, user may retry');
+            }, 5000);
             try {
                 const uploadPromise = prepareVideoUpload(file, (pct) => {
+                    lastPct = pct;
+                    lastPctAt = Date.now();
                     if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
-                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ') + pct + '% · ' + file.name + ' · ' + formatBytes(file.size);
+                    const chunkNote = isLarge && pct >= 35 && pct < 100
+                        ? (state.lang === 'ru' ? ' (части на сервер)' : ' (server chunks)')
+                        : '';
+                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
+                        + pct + '%' + chunkNote + ' · ' + file.name + ' · ' + formatBytes(file.size);
                 });
                 state.blobUploadPromise = uploadPromise;
                 const uploaded = await uploadPromise;
@@ -3323,6 +3359,8 @@
                 if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
                 videoFileMeta.textContent = (state.lang === 'ru' ? '❌ Ошибка загрузки: ' : '❌ Upload error: ') + (err.message || '');
                 console.error('Video pre-upload failed:', err);
+            } finally {
+                clearInterval(stallGuard);
             }
         }
 
