@@ -2020,10 +2020,13 @@
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         /** Stay under Vercel serverless ~4.5MB request body limit (multipart overhead). */
         const VERCEL_FUNCTION_BODY_SAFE_BYTES = 3 * 1024 * 1024;
+        /** Single POST upload via /api/upload-edge (under Vercel body limit). */
+        const VERCEL_EDGE_UPLOAD_MAX_BYTES = 4 * 1024 * 1024;
         /** Direct browser→Gemini: prefer 8MB non-final chunks when the network allows. */
         const GEMINI_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024;
         /** Server-proxied chunks must stay under Vercel body limit (~2.5MB on API). */
-        const SERVER_UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024;
+        const SERVER_UPLOAD_CHUNK_BYTES = Math.floor(2.4 * 1024 * 1024);
+        const TELEGRAM_BLOB_TIMEOUT_MS = 120000;
         const NETWORK_TIMEOUT_MS = 120000;
         /** Client → Blob CDN often hangs (UI stuck ~42%); fail fast and switch to chunked upload. */
         const CLIENT_BLOB_TRY_MS = 12000;
@@ -2447,6 +2450,34 @@
             return Boolean(tg?.initData || tg?.platform || window.Telegram?.WebApp);
         }
 
+        function ensureTelegramClientId() {
+            const tgUserId = tg?.initDataUnsafe?.user?.id;
+            if (!tgUserId) return;
+            const expected = `tg:${tgUserId}`;
+            if (state.clientId !== expected) {
+                state.clientId = expected;
+                safeStorage.setItem(STORAGE_KEYS.clientId, expected);
+            }
+        }
+
+        function getTelegramAltClientIds() {
+            const ids = [];
+            const tgUserId = tg?.initDataUnsafe?.user?.id;
+            const chatId = tg?.initDataUnsafe?.chat?.id;
+            if (tgUserId) ids.push(`tg:${tgUserId}`);
+            if (chatId) ids.push(`tg:${chatId}`);
+            return ids.filter((id, i, arr) => id && arr.indexOf(id) === i && id !== state.clientId);
+        }
+
+        function formatTelegramUploadError(lastErr, botErr) {
+            if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
+                const detail = String(lastErr?.message || '').trim();
+                if (detail && !/TG_BOT|telegramLargeVideoBotFallback/i.test(detail)) return detail;
+                return t('telegramLargeVideoBotFallback');
+            }
+            return String(lastErr?.message || botErr?.message || t('blobUploadFailed'));
+        }
+
         function isNetworkFetchError(error) {
             const msg = String(error?.message || error || '');
             return msg.includes('NetworkError') || msg.includes('Failed to fetch') || error?.name === 'TypeError' && /fetch/i.test(msg);
@@ -2542,11 +2573,63 @@
             });
         }
 
+        async function completeBlobUploadToGemini(blobUrl, mimeType, fileName, onProgress) {
+            const proxyUrl = getBackendEndpointUrl('/api/proxy-upload');
+            if (!proxyUrl) throw new Error(t('backendRequired'));
+            if (onProgress) onProgress(88);
+            const res = await fetch(proxyUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    blobUrl,
+                    mimeType: mimeType || 'video/mp4',
+                    fileName: fileName || 'video.mp4'
+                })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.error || `proxy-upload failed: ${res.status}`);
+            const uploadedFile = data?.file || data;
+            const fileUri = uploadedFile?.uri || '';
+            if (!fileUri) throw new Error(t('missingFileUri'));
+            if (onProgress) onProgress(97);
+            if (geminiFileNeedsProcessingWait(uploadedFile)) {
+                await waitForGeminiFileReady(uploadedFile?.name, null, onProgress);
+            }
+            if (onProgress) onProgress(100);
+            return {
+                fileUri,
+                mimeType: data?.mimeType || mimeType || 'video/mp4',
+                videoBlobUrl: blobUrl
+            };
+        }
+
+        async function finishBlobUpload(file, blobResult, onProgress) {
+            if (!blobResult?.url) throw new Error(t('blobUploadFailed'));
+            try {
+                return await completeBlobUploadToGemini(
+                    blobResult.url,
+                    file.type || 'video/mp4',
+                    file.name || 'video.mp4',
+                    onProgress
+                );
+            } catch (proxyErr) {
+                console.warn('Blob→Gemini proxy failed, keeping Blob URL for analyze:', proxyErr);
+                if (onProgress) onProgress(100);
+                return {
+                    videoBlobUrl: blobResult.url,
+                    fileUri: '',
+                    mimeType: file.type || 'video/mp4'
+                };
+            }
+        }
+
         /** Telegram bot → server downloads file and uploads to Gemini (no browser→Google). */
         async function importVideoFromTelegramBot(onProgress) {
             const base = getBackendEndpointUrl('/api/tg-file');
             if (!base) throw new Error(t('backendRequired'));
-            const url = `${base}?clientId=${encodeURIComponent(state.clientId)}`;
+            const altIds = getTelegramAltClientIds();
+            const altQuery = altIds.length ? `&altClientIds=${encodeURIComponent(altIds.join(','))}` : '';
+            const url = `${base}?clientId=${encodeURIComponent(state.clientId)}${altQuery}`;
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), GEMINI_UPLOAD_TIMEOUT_MS);
             startUploadProgressTicker(onProgress, 20, 95);
@@ -3127,10 +3210,21 @@
             }
 
             if (isTelegramWebApp()) {
+                ensureTelegramClientId();
                 if (onProgress) onProgress(8);
                 let lastErr = null;
                 if (fileSize > VERCEL_FUNCTION_BODY_SAFE_BYTES) {
+                    if (fileSize <= VERCEL_EDGE_UPLOAD_MAX_BYTES) {
+                        try {
+                            if (onProgress) onProgress(10);
+                            return await uploadVideoViaUploadEdge(file, onProgress);
+                        } catch (e) {
+                            lastErr = e;
+                            console.warn('Telegram upload-edge failed:', e);
+                        }
+                    }
                     try {
+                        if (onProgress) onProgress(12);
                         return await uploadVideoViaChunkedServer(file, onProgress);
                     } catch (e) {
                         lastErr = e;
@@ -3138,9 +3232,9 @@
                     }
                     if (blobOk) {
                         try {
-                            if (onProgress) onProgress(10);
-                            const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: BLOB_STALL_SWITCH_MS });
-                            return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                            if (onProgress) onProgress(14);
+                            const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: TELEGRAM_BLOB_TIMEOUT_MS });
+                            return await finishBlobUpload(file, blob, onProgress);
                         } catch (e) {
                             lastErr = e;
                             console.warn('Telegram Blob upload failed:', e);
@@ -3149,16 +3243,13 @@
                     try {
                         return await importVideoFromTelegramBot(onProgress);
                     } catch (botErr) {
-                        if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
-                            throw new Error(t('telegramLargeVideoBotFallback'));
-                        }
-                        throw lastErr || botErr;
+                        throw new Error(formatTelegramUploadError(lastErr, botErr));
                     }
                 }
                 if (blobOk) {
                     try {
-                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
-                        return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: TELEGRAM_BLOB_TIMEOUT_MS });
+                        return await finishBlobUpload(file, blob, onProgress);
                     } catch (e) {
                         lastErr = e;
                         console.warn('Telegram Blob upload failed:', e);
@@ -3166,8 +3257,13 @@
                 }
                 if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                     try {
+                        return await uploadVideoViaUploadEdge(file, onProgress);
+                    } catch (e) {
+                        lastErr = e;
+                    }
+                    try {
                         const blob = await uploadVideoToBlobViaServer(file, onProgress);
-                        return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                        return await finishBlobUpload(file, blob, onProgress);
                     } catch (e) {
                         lastErr = e;
                         try {
@@ -3192,22 +3288,20 @@
                 if (isTelegramWebApp() && blobOk) {
                     try {
                         if (onProgress) onProgress(6);
-                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: BLOB_STALL_SWITCH_MS });
-                        return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: TELEGRAM_BLOB_TIMEOUT_MS });
+                        return await finishBlobUpload(file, blob, onProgress);
                     } catch (blobErr) {
                         largeErr = blobErr;
                         console.warn('Telegram Blob fallback failed:', blobErr);
                     }
                 }
                 if (isTelegramWebApp()) {
+                    ensureTelegramClientId();
                     try {
                         if (onProgress) onProgress(10);
                         return await importVideoFromTelegramBot(onProgress);
                     } catch (botErr) {
-                        if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
-                            throw new Error(t('telegramLargeVideoBotFallback'));
-                        }
-                        throw largeErr || botErr;
+                        throw new Error(formatTelegramUploadError(largeErr, botErr));
                     }
                 }
                 throw largeErr || new Error(t('blobUploadFailed'));
@@ -4912,6 +5006,7 @@
         backendUrlInput.value = state.backendUrl;
         document.getElementById('free-limit-input').value = String(state.freeLimit);
         updateQuotaLabel();
+        ensureTelegramClientId();
 
         if (!canAnalyze()) {
             openSettings();

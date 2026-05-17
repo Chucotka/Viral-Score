@@ -914,7 +914,10 @@ export default async function handler(req, res) {
       res.statusCode = 204;
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name, X-Upload-Url, X-Upload-Session-Id, X-Chunk-Offset, X-Goog-Upload-Command');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, X-Mime-Type, x-mime-type, X-File-Size, X-File-Name, X-Upload-Url, X-Upload-Session-Id, x-upload-session-id, X-Chunk-Offset, x-chunk-offset, X-Goog-Upload-Command, x-goog-upload-command'
+      );
       return res.end();
     }
 
@@ -1027,7 +1030,17 @@ export default async function handler(req, res) {
       if (!uploadRes.ok) {
         return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini chunk upload failed: ${uploadRes.status}`) });
       }
-      const text = await uploadRes.text();
+      let text = await uploadRes.text();
+      if (!text && /finalize/i.test(command)) {
+        const queryRes = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'X-Goog-Upload-Offset': '0',
+            'X-Goog-Upload-Command': 'query'
+          }
+        });
+        if (queryRes.ok) text = await queryRes.text();
+      }
       if (!text) return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
       try {
         const data = JSON.parse(text);
@@ -1041,6 +1054,23 @@ export default async function handler(req, res) {
         return sendJson(res, 200, { file: uploadedFile, mimeType });
       } catch {
         return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
+      }
+    }
+
+    // Blob URL → Gemini (used after client Blob upload in Telegram / Mini App).
+    if (req.method === 'POST' && path === '/api/proxy-upload') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured.' });
+      const body = await readJson(req, url).catch(() => ({}));
+      const blobUrl = String(body?.blobUrl || '').trim();
+      const mimeType = String(body?.mimeType || 'video/mp4').trim();
+      const fileName = String(body?.fileName || 'video.mp4').trim().slice(0, 200);
+      if (!blobUrl) return sendJson(res, 400, { error: 'blobUrl required' });
+      try {
+        const uploadedFile = await uploadVideoFromBlobUrl(blobUrl);
+        if (!uploadedFile?.uri) return sendJson(res, 502, { error: 'Missing file URI from Gemini.' });
+        return sendJson(res, 200, { file: uploadedFile, mimeType: uploadedFile.mimeType || mimeType, fileName });
+      } catch (e) {
+        return sendJson(res, 502, { error: e?.message || 'proxy-upload failed' });
       }
     }
 
@@ -1112,7 +1142,13 @@ export default async function handler(req, res) {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY not configured.' });
       const clientId = url.searchParams.get('clientId') || '';
       if (!clientId) return sendJson(res, 400, { error: 'clientId required.' });
-      const entry = tgVideoStore.get(clientId);
+      const altRaw = String(url.searchParams.get('altClientIds') || '');
+      const lookupIds = [clientId, ...altRaw.split(',').map(s => s.trim()).filter(Boolean)];
+      let entry = null;
+      for (const id of lookupIds) {
+        entry = tgVideoStore.get(normalizeClientId(id) || id);
+        if (entry) break;
+      }
       if (!entry) return sendJson(res, 404, { error: 'No video found for this clientId. Send video to bot first.' });
       const { fileId, mimeType } = entry;
       const { buffer, filePath } = await downloadTgFile(fileId);
