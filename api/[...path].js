@@ -971,28 +971,48 @@ export default async function handler(req, res) {
     // Proxy one chunk of a Gemini resumable upload (keeps browser off Google; each body < Vercel limit).
     if (req.method === 'POST' && path === '/api/upload-chunk') {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
-      const sessionId = String(req.headers['x-upload-session-id'] || '').trim();
-      let uploadUrl = String(req.headers['x-upload-url'] || '').trim();
-      if (sessionId) {
-        const entry = geminiUploadSessionStore.get(sessionId);
-        if (!entry) return sendJson(res, 404, { error: 'Upload session expired. Start a new upload.' });
-        uploadUrl = entry.uploadUrl;
-      }
-      if (!uploadUrl) return sendJson(res, 400, { error: 'X-Upload-Session-Id or X-Upload-Url is required.' });
-      const offset = Number(req.headers['x-chunk-offset'] || 0);
-      const command = String(req.headers['x-goog-upload-command'] || 'upload').trim();
-      const mimeType = String(req.headers['x-mime-type'] || req.headers['content-type'] || 'application/octet-stream').trim();
       const CHUNK_MAX = 2.5 * 1024 * 1024;
-      const chunks = [];
-      await new Promise((resolve, reject) => {
-        req.on('data', c => chunks.push(c));
-        req.on('end', resolve);
-        req.on('error', reject);
-      });
-      const buffer = Buffer.concat(chunks);
+      const contentType = String(req.headers['content-type'] || '');
+      let uploadUrl = '';
+      let offset = 0;
+      let command = 'upload';
+      let mimeType = 'application/octet-stream';
+      let buffer = Buffer.alloc(0);
+      let sessionId = '';
+
+      if (contentType.includes('application/json')) {
+        const body = await readJson(req, url).catch(() => ({}));
+        uploadUrl = String(body?.uploadUrl || '').trim();
+        offset = Number(body?.offset || 0);
+        command = String(body?.command || 'upload').trim();
+        mimeType = String(body?.mimeType || 'video/mp4').trim();
+        const b64 = String(body?.chunkBase64 || '');
+        if (!uploadUrl || !b64) return sendJson(res, 400, { error: 'uploadUrl and chunkBase64 are required.' });
+        buffer = Buffer.from(b64, 'base64');
+      } else {
+        sessionId = String(req.headers['x-upload-session-id'] || '').trim();
+        uploadUrl = String(req.headers['x-upload-url'] || '').trim();
+        if (sessionId) {
+          const entry = geminiUploadSessionStore.get(sessionId);
+          if (!entry) return sendJson(res, 404, { error: 'Upload session expired. Start a new upload.' });
+          uploadUrl = entry.uploadUrl;
+        }
+        if (!uploadUrl) return sendJson(res, 400, { error: 'uploadUrl required (JSON body or X-Upload-Url header).' });
+        offset = Number(req.headers['x-chunk-offset'] || 0);
+        command = String(req.headers['x-goog-upload-command'] || 'upload').trim();
+        mimeType = String(req.headers['x-mime-type'] || req.headers['content-type'] || 'application/octet-stream').trim();
+        const chunks = [];
+        await new Promise((resolve, reject) => {
+          req.on('data', c => chunks.push(c));
+          req.on('end', resolve);
+          req.on('error', reject);
+        });
+        buffer = Buffer.concat(chunks);
+      }
+
       if (!buffer.length) return sendJson(res, 400, { error: 'Empty chunk body.' });
       if (buffer.length > CHUNK_MAX) {
-        return sendJson(res, 413, { error: 'Chunk too large. Use 2MB chunks.' });
+        return sendJson(res, 413, { error: 'Chunk too large. Use 1.5MB chunks.' });
       }
       const uploadRes = await fetch(uploadUrl, {
         method: 'POST',

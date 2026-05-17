@@ -2018,8 +2018,8 @@
         const DIRECT_UPLOAD_LIMIT_BYTES = 4 * 1024 * 1024;
         /** Stay under Vercel serverless ~4.5MB request body limit (multipart overhead). */
         const VERCEL_FUNCTION_BODY_SAFE_BYTES = 3 * 1024 * 1024;
-        /** Chunk size for server-proxied Gemini upload (Telegram / large files). */
-        const UPLOAD_CHUNK_BYTES = 2 * 1024 * 1024;
+        /** Chunk size for JSON upload-chunk (base64 ~33% overhead; stay under Vercel 4.5MB). */
+        const UPLOAD_CHUNK_BYTES = Math.floor(1.5 * 1024 * 1024);
         const NETWORK_TIMEOUT_MS = 120000;
         /** Client → Blob CDN often hangs in Telegram; fail fast and use server fallback. */
         const CLIENT_BLOB_TRY_MS = 18000;
@@ -2446,6 +2446,19 @@
             return msg.includes('NetworkError') || msg.includes('Failed to fetch') || error?.name === 'TypeError' && /fetch/i.test(msg);
         }
 
+        function blobToBase64(blob) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const dataUrl = String(reader.result || '');
+                    const comma = dataUrl.indexOf(',');
+                    resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+                };
+                reader.onerror = () => reject(new Error(t('blobUploadFailed')));
+                reader.readAsDataURL(blob);
+            });
+        }
+
         function stopUploadProgressTicker() {
             if (uploadProgressTickerId) {
                 clearInterval(uploadProgressTickerId);
@@ -2575,45 +2588,25 @@
             }
         }
 
-        function postUploadChunkXhr(chunkBlob, uploadSessionId, offset, command, mimeType) {
+        /** Stateless chunk upload — uploadUrl in JSON (works across Vercel serverless instances). */
+        async function postUploadChunkJson(chunkBlob, geminiUploadUrl, offset, command, mimeType) {
             const chunkUrl = getBackendEndpointUrl('/api/upload-chunk');
-            if (!chunkUrl) return Promise.reject(new Error(t('backendRequired')));
-            return new Promise((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                const timeout = setTimeout(() => {
-                    xhr.abort();
-                    reject(new Error(t('analysisTimeout')));
-                }, NETWORK_TIMEOUT_MS);
-                xhr.onload = () => {
-                    clearTimeout(timeout);
-                    try {
-                        const data = JSON.parse(xhr.responseText || '{}');
-                        if (xhr.status < 200 || xhr.status >= 300) {
-                            reject(new Error(data?.error || `Chunk upload failed: ${xhr.status}`));
-                            return;
-                        }
-                        resolve(data);
-                    } catch {
-                        if (xhr.status >= 200 && xhr.status < 300) resolve({ ok: true });
-                        else reject(new Error(t('blobUploadFailed')));
-                    }
-                };
-                xhr.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(new Error(isTelegramWebApp() ? t('telegramNetworkError') : t('blobUploadFailed')));
-                };
-                xhr.onabort = () => {
-                    clearTimeout(timeout);
-                    reject(new Error(t('analysisTimeout')));
-                };
-                xhr.open('POST', chunkUrl);
-                xhr.setRequestHeader('Content-Type', mimeType);
-                xhr.setRequestHeader('X-Upload-Session-Id', uploadSessionId);
-                xhr.setRequestHeader('X-Chunk-Offset', String(offset));
-                xhr.setRequestHeader('X-Goog-Upload-Command', command);
-                xhr.setRequestHeader('X-Mime-Type', mimeType);
-                xhr.send(chunkBlob);
+            if (!chunkUrl) throw new Error(t('backendRequired'));
+            const chunkBase64 = await blobToBase64(chunkBlob);
+            const res = await fetch(chunkUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uploadUrl: geminiUploadUrl,
+                    offset,
+                    command,
+                    mimeType,
+                    chunkBase64
+                })
             });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.error || `Chunk upload failed: ${res.status}`);
+            return data;
         }
 
         /** Full-file upload via dedicated /api/upload-edge (stable for 15MB+ in Telegram). */
@@ -2715,8 +2708,8 @@
                 if (!sessionRes.ok) {
                     throw new Error(sessionData?.error || `Upload session failed: ${sessionRes.status}`);
                 }
-                const uploadSessionId = sessionData?.uploadSessionId || '';
-                if (!uploadSessionId) throw new Error(t('missingUploadUrl'));
+                const geminiUploadUrl = sessionData?.uploadUrl || '';
+                if (!geminiUploadUrl) throw new Error(t('missingUploadUrl'));
                 stopUploadProgressTicker();
                 let offset = 0;
                 let lastPayload = null;
@@ -2729,7 +2722,7 @@
                         const pct = 35 + Math.round((offset / Math.max(fileSize, 1)) * 55);
                         onProgress(Math.min(92, pct));
                     }
-                    lastPayload = await postUploadChunkXhr(chunk, uploadSessionId, offset, command, mimeType);
+                    lastPayload = await postUploadChunkJson(chunk, geminiUploadUrl, offset, command, mimeType);
                     offset = end;
                 }
                 const uploadedFile = lastPayload?.file || lastPayload;
@@ -2755,15 +2748,7 @@
         /** Large files: browser → Gemini resumable URL (skips Vercel 4.5MB body limit). Not reliable in Telegram WebView. */
         async function uploadVideoDirectToGemini(file, onProgress) {
             if (isTelegramWebApp()) {
-                try {
-                    return await uploadVideoViaUploadEdge(file, onProgress);
-                } catch (edgeErr) {
-                    try {
-                        return await uploadVideoViaChunkedServer(file, onProgress);
-                    } catch {
-                        throw edgeErr;
-                    }
-                }
+                return uploadVideoViaChunkedServer(file, onProgress);
             }
             const sessionUrl = getBackendEndpointUrl('/api/upload-session');
             if (!sessionUrl) throw new Error(t('backendRequired'));
@@ -2826,20 +2811,39 @@
             }
         }
 
-        async function uploadVideoToBlob(file, onProgress) {
+        async function loadBlobClientUpload() {
+            const urls = [
+                'https://cdn.jsdelivr.net/npm/@vercel/blob@0.27.1/+esm',
+                'https://esm.sh/@vercel/blob@0.27.1/client'
+            ];
+            let lastErr = null;
+            for (const url of urls) {
+                try {
+                    const mod = await import(url);
+                    if (mod?.upload) return mod.upload;
+                } catch (e) {
+                    lastErr = e;
+                }
+            }
+            throw lastErr || new Error(t('blobUploadFailed'));
+        }
+
+        async function uploadVideoToBlob(file, onProgress, options = {}) {
             if (!file) throw new Error(t('chooseVideoFirst'));
             if (state.backendHealth && state.backendHealth.blobConfigured === false) {
                 throw new Error(t('blobNotConfigured'));
             }
             const handleUploadUrl = getBackendEndpointUrl('/api/blob/upload');
             if (!handleUploadUrl) throw new Error(t('blobNotConfigured'));
+            const blobTimeoutMs = options.timeoutMs
+                || (isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : CLIENT_BLOB_TRY_MS);
 
             const tryClientUpload = async () => {
-                const { upload } = await import('https://esm.sh/@vercel/blob@0.27.1/client');
+                const upload = await loadBlobClientUpload();
                 return Promise.race([
                     upload(file.name, file, { access: 'public', handleUploadUrl }),
                     new Promise((_, reject) => {
-                        setTimeout(() => reject(new Error('CLIENT_BLOB_TIMEOUT')), CLIENT_BLOB_TRY_MS);
+                        setTimeout(() => reject(new Error('CLIENT_BLOB_TIMEOUT')), blobTimeoutMs);
                     })
                 ]);
             };
@@ -2990,36 +2994,50 @@
 
             if (isTelegramWebApp()) {
                 if (onProgress) onProgress(8);
+                let lastErr = null;
+                if (blobOk) {
+                    try {
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
+                        return { videoBlobUrl: blob.url, fileUri: '', mimeType };
+                    } catch (e) {
+                        lastErr = e;
+                        console.warn('Telegram Blob upload failed:', e);
+                    }
+                }
                 if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                     try {
                         const blob = await uploadVideoToBlobViaServer(file, onProgress);
                         return { videoBlobUrl: blob.url, fileUri: '', mimeType };
-                    } catch (blobErr) {
-                        if (onProgress) onProgress(40);
+                    } catch (e) {
+                        lastErr = e;
                         try {
                             return await uploadVideoViaServerProxy(file, onProgress);
                         } catch (proxyErr) {
-                            if (isNetworkFetchError(blobErr) || isNetworkFetchError(proxyErr)) {
-                                throw new Error(t('telegramNetworkError'));
-                            }
-                            throw proxyErr;
+                            lastErr = proxyErr;
                         }
                     }
                 }
                 try {
-                    return await uploadVideoViaUploadEdge(file, onProgress);
-                } catch (edgeErr) {
-                    try {
-                        return await uploadVideoViaChunkedServer(file, onProgress);
-                    } catch (chunkErr) {
+                    return await uploadVideoViaChunkedServer(file, onProgress);
+                } catch (chunkErr) {
+                    lastErr = chunkErr;
+                    if (fileSize <= VERCEL_FUNCTION_BODY_SAFE_BYTES) {
                         try {
-                            return await importVideoFromTelegramBot(onProgress);
-                        } catch (botErr) {
-                            if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
-                                throw new Error(t('telegramLargeVideoBotFallback'));
-                            }
-                            throw edgeErr;
+                            return await uploadVideoViaUploadEdge(file, onProgress);
+                        } catch (edgeErr) {
+                            lastErr = edgeErr;
                         }
+                    }
+                    try {
+                        return await importVideoFromTelegramBot(onProgress);
+                    } catch (botErr) {
+                        if (botErr?.code === 'TG_BOT_VIDEO_MISSING') {
+                            const detail = String(lastErr?.message || '').trim();
+                            throw new Error(detail && !detail.includes('TG_BOT')
+                                ? detail
+                                : t('telegramLargeVideoBotFallback'));
+                        }
+                        throw lastErr || botErr;
                     }
                 }
             }
