@@ -2456,6 +2456,13 @@
             }
         }
 
+        /** Poll Gemini only when API explicitly reports a non-ACTIVE state (not when state is missing). */
+        function geminiFileNeedsProcessingWait(uploadedFile) {
+            const state = uploadedFile?.state;
+            if (!state || state === 'ACTIVE') return false;
+            return Boolean(uploadedFile?.name);
+        }
+
         /** Smooth progress while waiting on network (avoids frozen UI at 20%). */
         function startUploadProgressTicker(onProgress, fromPct, toPct) {
             stopUploadProgressTicker();
@@ -2557,8 +2564,8 @@
                 const fileResourceName = uploadedFile?.name || '';
                 if (!fileUri) throw new Error(t('missingFileUri'));
                 if (onProgress) onProgress(78);
-                if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
-                    await waitForGeminiFileReady(fileResourceName, controller.signal);
+                if (geminiFileNeedsProcessingWait(uploadedFile)) {
+                    await waitForGeminiFileReady(fileResourceName, controller.signal, onProgress);
                 }
                 if (onProgress) onProgress(100);
                 return {
@@ -2665,7 +2672,7 @@
             const fileResourceName = uploadedFile?.name || '';
             if (!fileUri) throw new Error(t('missingFileUri'));
             if (onProgress) onProgress(93);
-            if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
+            if (geminiFileNeedsProcessingWait(uploadedFile)) {
                 await waitForGeminiFileReady(fileResourceName, signal, onProgress);
             }
             if (onProgress) onProgress(100);
@@ -2711,9 +2718,9 @@
                             return;
                         }
                         if (onProgress) onProgress(94);
-                        if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
+                        if (geminiFileNeedsProcessingWait(uploadedFile)) {
                             try {
-                                await waitForGeminiFileReady(fileResourceName);
+                                await waitForGeminiFileReady(fileResourceName, null, onProgress);
                             } catch (waitErr) {
                                 reject(waitErr);
                                 return;
@@ -2841,9 +2848,9 @@
             let blobPulsePct = 8;
             if (isLarge && onProgress) {
                 blobPulseId = setInterval(() => {
-                    blobPulsePct = Math.min(78, blobPulsePct + 1);
+                    blobPulsePct = Math.min(92, blobPulsePct + 1);
                     onProgress(blobPulsePct);
-                }, 2500);
+                }, 2000);
             }
             try {
                 const result = await tryClientUpload();
@@ -2882,22 +2889,32 @@
             if (!statusBase) return;
             const started = Date.now();
             let delayMs = 0;
-            while (Date.now() - started < 120000) {
-                if (delayMs) await sleep(delayMs);
-                delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 500;
-                if (onProgress) {
-                    const elapsed = Date.now() - started;
-                    const pct = 93 + Math.min(6, Math.round((elapsed / 120000) * 6));
-                    onProgress(pct);
+            startUploadProgressTicker(onProgress, 78, 98);
+            try {
+                while (Date.now() - started < 120000) {
+                    if (delayMs) await sleep(delayMs);
+                    delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 500;
+                    if (onProgress) {
+                        const elapsed = Date.now() - started;
+                        const pct = 78 + Math.min(20, Math.round((elapsed / 120000) * 20));
+                        onProgress(pct);
+                    }
+                    const statusUrl = `${statusBase}?name=${encodeURIComponent(name)}`;
+                    const statusRes = await fetch(statusUrl, { signal });
+                    const meta = await statusRes.json().catch(() => ({}));
+                    if (!statusRes.ok) {
+                        if (statusRes.status === 405 || statusRes.status === 404) {
+                            throw new Error(t('fileProcessTimeout'));
+                        }
+                        continue;
+                    }
+                    if (meta.state === 'ACTIVE') return meta;
+                    if (meta.state === 'FAILED') throw new Error(t('fileProcessFailed'));
                 }
-                const statusUrl = `${statusBase}?name=${encodeURIComponent(name)}`;
-                const statusRes = await fetch(statusUrl, { signal });
-                const meta = await statusRes.json().catch(() => ({}));
-                if (!statusRes.ok) continue;
-                if (meta.state === 'ACTIVE') return meta;
-                if (meta.state === 'FAILED') throw new Error(t('fileProcessFailed'));
+                throw new Error(t('fileProcessTimeout'));
+            } finally {
+                stopUploadProgressTicker();
             }
-            throw new Error(t('fileProcessTimeout'));
         }
 
         /** Small files only — POST body must stay under Vercel ~4.5MB limit. Uses XHR (works better in Telegram WebView than fetch). */
@@ -2943,9 +2960,9 @@
                             return;
                         }
                         if (onProgress) onProgress(78);
-                        if (uploadedFile?.state !== 'ACTIVE' && fileResourceName) {
+                        if (geminiFileNeedsProcessingWait(uploadedFile)) {
                             try {
-                                await waitForGeminiFileReady(fileResourceName);
+                                await waitForGeminiFileReady(fileResourceName, null, onProgress);
                             } catch (waitErr) {
                                 reject(waitErr);
                                 return;
@@ -3052,7 +3069,8 @@
                 if (blobOk) {
                     try {
                         if (onProgress) onProgress(6);
-                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: GEMINI_UPLOAD_TIMEOUT_MS });
+                        const blobTimeout = isTelegramWebApp() ? GEMINI_UPLOAD_TIMEOUT_MS : BLOB_STALL_SWITCH_MS;
+                        const blob = await uploadVideoToBlob(file, onProgress, { timeoutMs: blobTimeout });
                         return { videoBlobUrl: blob.url, fileUri: '', mimeType };
                     } catch (blobErr) {
                         console.warn('Large file Blob upload failed, trying Gemini chunks:', blobErr);
@@ -3327,8 +3345,8 @@
                     lastPctAt = Date.now();
                     if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
                     let statusNote = '';
-                    if (pct >= 93) statusNote = ' · ' + t('uploadProcessingGemini');
-                    else if (isLarge && pct >= 10 && pct < 93 && !isTelegramWebApp()) {
+                    if (pct >= 78) statusNote = ' · ' + t('uploadProcessingGemini');
+                    else if (isLarge && pct >= 10 && pct < 78 && !isTelegramWebApp()) {
                         statusNote = state.lang === 'ru' ? ' · хранилище/Gemini' : ' · storage/Gemini';
                     } else if (isLarge && isTelegramWebApp()) statusNote = ' · Blob';
                     videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')

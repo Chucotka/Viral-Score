@@ -96,7 +96,7 @@ export default async function handler(req, res) {
     const uploadData = await uploadRes.json();
     const uploadedFile = uploadData.file || uploadData;
     const uploadName = uploadedFile?.name || uploadData?.name;
-    if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
+    if (uploadName && uploadedFile?.state !== 'ACTIVE') {
       const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
       return res.status(200).json({ file: ready, mimeType: ready.mimeType || mimeType });
     }

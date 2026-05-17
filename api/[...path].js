@@ -1034,7 +1034,7 @@ export default async function handler(req, res) {
         const uploadedFile = data.file || data;
         const uploadName = uploadedFile?.name || data?.name;
         if (sessionId) geminiUploadSessionStore.delete(sessionId);
-        if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
+        if (uploadName && uploadedFile?.state !== 'ACTIVE') {
           const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
           return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });
         }
@@ -1099,7 +1099,7 @@ export default async function handler(req, res) {
       const uploadData = await uploadRes.json();
       const uploadedFile = uploadData.file || uploadData;
       const uploadName = uploadedFile?.name || uploadData?.name;
-      if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
+      if (uploadName && uploadedFile?.state !== 'ACTIVE') {
         const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
         return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });
       }
