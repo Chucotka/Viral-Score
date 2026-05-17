@@ -1576,7 +1576,7 @@
         const botUsernameInput = document.getElementById('bot-username-input');
         const launchChecklist = document.getElementById('launch-checklist');
         const analyzeBtn = document.getElementById('analyze-btn');
-        const analyzeBtnLabel = analyzeBtn.querySelector('[data-i18n="analyzeButton"]');
+        const analyzeBtnLabel = analyzeBtn?.querySelector('[data-i18n="analyzeButton"]');
         const analyzeAgainBtn = document.getElementById('analyze-again-btn');
         const starsPayBtn = document.getElementById('stars-pay-btn');
         const cardPayBtn = document.getElementById('card-pay-btn');
@@ -2163,6 +2163,7 @@
             blobUploadPromise: null,
             geminiTransferPromise: null,
             uploadInProgress: false,
+            analyzeInProgress: false,
             loadingInterval: null,
             loadingMessages: [],
             lastAnalysisResult: null,
@@ -5011,7 +5012,17 @@
             }
         }
 
+        function getAnalyzeLoadingMessages() {
+            if (state.currentSourceType === 'video-file') {
+                return [t('analyzingVideo'), t('scoringHook'), t('writingRewrites')];
+            }
+            return [t('collectingContext'), t('scoringHook'), t('measuringRetention'), t('writingRewrites')];
+        }
+
         async function analyzeContent() {
+            if (state.analyzeInProgress) return;
+            if (!analyzeBtn) return;
+
             if (!canAnalyze()) {
                 openSettings();
                 mainError.textContent = t('backendRequired');
@@ -5035,34 +5046,12 @@
             }
 
             clearFieldErrors();
-            const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
-            const effectiveMode = state.currentSourceType === 'video-file' && !isLocalBackendUrl()
-                ? 'quick'
-                : state.currentMode;
-            let prompt = buildAnalysisPayload('', effectiveMode);
 
             if (state.currentSourceType === 'video-file' && !state.selectedVideoFile) {
                 mainError.textContent = t('chooseVideoFirst');
                 mainError.style.display = 'block';
                 if (errorActions) errorActions.classList.remove('hidden');
                 return;
-            }
-            if (state.currentSourceType === 'video-file' && state.selectedVideoFile && !isLocalBackendUrl()) {
-                if (state.blobUploadPromise) {
-                    try {
-                        await state.blobUploadPromise;
-                    } catch {
-                        // Error surfaced below if fileUri still missing.
-                    }
-                }
-                if (!state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri) {
-                    mainError.textContent = state.lang === 'ru'
-                        ? 'Загрузка видео не завершилась. Выбери файл снова или дождись «Готово к анализу».'
-                        : 'Video upload did not finish. Re-select the file or wait until it shows ready.';
-                    mainError.style.display = 'block';
-                    if (errorActions) errorActions.classList.remove('hidden');
-                    return;
-                }
             }
             if (state.currentSourceType === 'video-url' && !postUrlInput.value.trim()) {
                 mainError.textContent = t('pasteLinkFirst');
@@ -5077,25 +5066,40 @@
                 return;
             }
 
+            state.analyzeInProgress = true;
+            startLoading(getAnalyzeLoadingMessages());
+
             try {
                 if (state.currentSourceType === 'video-file' && state.selectedVideoFile && !isLocalBackendUrl()) {
                     if (state.blobUploadPromise) {
-                        try { await state.blobUploadPromise; } catch { /* handled below */ }
+                        setLoadingStage(t('uploadStart'), { creep: true, maxMs: GEMINI_UPLOAD_TIMEOUT_MS });
+                        try {
+                            await state.blobUploadPromise;
+                        } catch {
+                            // Handled below if fileUri/blob still missing.
+                        }
+                    }
+                    if (!state.uploadedVideoBlobUrl && !state.uploadedVideoFileUri) {
+                        throw new Error(state.lang === 'ru'
+                            ? 'Загрузка видео не завершилась. Выбери файл снова или дождись «Готово к анализу».'
+                            : 'Video upload did not finish. Re-select the file or wait until it shows ready.');
                     }
                     await waitForVideoAnalysisReady();
                 }
             } catch (prepErr) {
+                stopLoading();
+                state.analyzeInProgress = false;
+                setScreen('main');
                 mainError.textContent = prepErr?.message || t('videoTransferFailed');
                 mainError.style.display = 'block';
                 if (errorActions) errorActions.classList.remove('hidden');
                 return;
             }
 
-            startLoading(
-                state.currentSourceType === 'video-file'
-                    ? [t('analyzingVideo'), t('scoringHook'), t('writingRewrites')]
-                    : [t('collectingContext'), t('scoringHook'), t('measuringRetention'), t('writingRewrites')]
-            );
+            const effectiveMode = state.currentSourceType === 'video-file' && !isLocalBackendUrl()
+                ? 'quick'
+                : state.currentMode;
+            const prompt = buildAnalysisPayload('', effectiveMode);
 
             try {
                 let parsed = null;
@@ -5173,6 +5177,8 @@
                 }
                 mainError.style.display = 'block';
                 if (errorActions) errorActions.classList.remove('hidden');
+            } finally {
+                state.analyzeInProgress = false;
             }
         }
 
@@ -5301,6 +5307,7 @@
                 clearVideoSelection();
             });
 
+            if (!analyzeBtn) return;
             analyzeBtn.addEventListener('click', () => {
                 if (analyzeBtn.disabled) {
                     let hint = '';

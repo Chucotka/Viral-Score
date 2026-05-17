@@ -529,16 +529,17 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
   const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
-  const maxOutputTokens = isVideo ? 768 : (quick ? 1536 : 2200);
+  const maxOutputTokens = isVideo ? 3072 : (quick ? 3072 : 4096);
   const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
   const timeoutMs = isVideo ? GEMINI_VIDEO_GENERATE_TIMEOUT_MS : GEMINI_GENERATE_TIMEOUT_MS;
   let lastError = null;
   for (const model of models) {
+    for (const tokenCap of (maxOutputTokens >= 4096 ? [maxOutputTokens] : [maxOutputTokens, 4096])) {
     try {
       const generationConfig = {
         temperature,
         topP: 0.92,
-        maxOutputTokens,
+        maxOutputTokens: tokenCap,
         responseMimeType: 'application/json',
         responseSchema: ANALYSIS_SCHEMA
       };
@@ -552,7 +553,15 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
           generationConfig
         })
       });
-      if (response.ok) return response.json();
+      if (response.ok) {
+        const data = await response.json();
+        const finishReason = data?.candidates?.[0]?.finishReason;
+        if (finishReason === 'MAX_TOKENS' && tokenCap < 4096) {
+          lastError = new Error(`Model ${model} response was cut off.`);
+          continue;
+        }
+        return data;
+      }
       lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
@@ -560,6 +569,7 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
         continue;
       }
       throw error;
+    }
     }
   }
   throw lastError || new Error('All Gemini models failed.');
@@ -777,10 +787,6 @@ async function analyzeMultipart(formData) {
   const data = sourceType === 'video-file' || hasUploadedVideo
     ? await callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, language })
     : await callGemini(requestBody, mode, { isVideo: false });
-  const finishReason = data?.candidates?.[0]?.finishReason;
-  if (finishReason === 'MAX_TOKENS') {
-    throw new Error('Gemini response was cut off.');
-  }
   const result = normalizeResult(parseModelJson(extractModelText(data)));
 
   client.usageCount += 1;

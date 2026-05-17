@@ -444,7 +444,7 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
   const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
-  const maxOutputTokens = isVideo ? 768 : (quick ? 1536 : 2200);
+  const maxOutputTokens = isVideo ? 3072 : (quick ? 3072 : 4096);
   const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
   let lastError = null;
   for (const model of models) {
@@ -642,10 +642,6 @@ async function analyzeMultipart(formData) {
 
   const hasUploadedVideo = requestBody?.contents?.[0]?.parts?.some((p) => p.file_data?.file_uri);
   const data = await callGemini(requestBody, mode, { isVideo: sourceType === 'video-file' || hasUploadedVideo });
-  const finishReason = data?.candidates?.[0]?.finishReason;
-  if (finishReason === 'MAX_TOKENS') {
-    throw new Error('Gemini response was cut off.');
-  }
   const result = normalizeResult(parseModelJson(extractModelText(data)));
   client.usageCount += 1;
   client.lastAnalysis = {
