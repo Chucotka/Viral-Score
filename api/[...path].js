@@ -900,7 +900,7 @@ export default async function handler(req, res) {
       res.statusCode = 204;
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Mime-Type, X-File-Size, X-File-Name');
       return res.end();
     }
 
@@ -999,6 +999,11 @@ export default async function handler(req, res) {
       if (!uploadRes.ok) return sendJson(res, 502, { error: await getApiError(uploadRes, `Gemini upload failed: ${uploadRes.status}`) });
       const uploadData = await uploadRes.json();
       const uploadedFile = uploadData.file || uploadData;
+      const uploadName = uploadedFile?.name || uploadData?.name;
+      if (uploadName && uploadedFile?.state && uploadedFile.state !== 'ACTIVE') {
+        const ready = await waitGeminiFileProcessed(uploadName, mimeType, uploadedFile);
+        return sendJson(res, 200, { file: ready, mimeType: ready.mimeType || mimeType });
+      }
       return sendJson(res, 200, { file: uploadedFile, mimeType });
     }
 
