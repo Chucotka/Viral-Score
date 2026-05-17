@@ -854,17 +854,16 @@ async function handleBlobClientUpload(req, url) {
     error.statusCode = 500;
     throw error;
   }
-  // url must use the real public host so handleUpload generates a valid callback URL
+  // Read body once from the Node stream — Readable.toWeb(req) + request.json() can hang on Vercel.
+  const body = await readJson(req, url);
   const request = new Request(url.toString(), {
-    method: req.method,
-    headers: req.headers,
-    body: Readable.toWeb(req),
-    duplex: 'half'
+    method: req.method || 'POST',
+    headers: req.headers
   });
-  const body = await request.json();
   return handleUpload({
     body,
     request,
+    token: BLOB_READ_WRITE_TOKEN,
     onBeforeGenerateToken: async () => ({
       allowedContentTypes: ['video/mp4', 'video/quicktime', 'video/webm', 'video/x-matroska', 'application/octet-stream'],
       addRandomSuffix: true,
@@ -932,7 +931,12 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST' && path === '/api/blob/upload') {
-      return sendJson(res, 200, await handleBlobClientUpload(req, url));
+      try {
+        return sendJson(res, 200, await handleBlobClientUpload(req, url));
+      } catch (error) {
+        const status = Number(error?.statusCode) || 400;
+        return sendJson(res, status, { error: error?.message || 'Blob upload handler failed.' });
+      }
     }
 
     if (req.method === 'POST' && path === '/api/blob/client-token') {
@@ -1048,7 +1052,12 @@ export default async function handler(req, res) {
           if (queryRes.ok) text = await queryRes.text();
         }
       }
-      if (!text) return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
+      if (!text) {
+        if (/finalize/i.test(command)) {
+          return sendJson(res, 502, { error: 'Gemini finalize completed without file metadata. Retry upload.' });
+        }
+        return sendJson(res, 200, { ok: true, offset: offset + buffer.length });
+      }
       try {
         const data = JSON.parse(text);
         const uploadedFile = data.file || data;
