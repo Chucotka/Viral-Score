@@ -520,29 +520,41 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
   return { ...uploadedFile, mimeType };
 }
 
+const GEMINI_GENERATE_TIMEOUT_MS = 90000;
+
 async function callGemini(requestBody, mode = 'pro') {
   const quick = mode === 'quick';
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
   const maxOutputTokens = quick ? 1536 : 2200;
+  const models = quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES;
   let lastError = null;
-  for (const model of MODEL_CANDIDATES) {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...requestBody,
-        generationConfig: {
-          temperature,
-          topP: 0.92,
-          maxOutputTokens,
-          responseMimeType: 'application/json',
-          responseSchema: ANALYSIS_SCHEMA
-        }
-      })
-    });
-    if (response.ok) return response.json();
-    lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
+  for (const model of models) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(GEMINI_GENERATE_TIMEOUT_MS),
+        body: JSON.stringify({
+          ...requestBody,
+          generationConfig: {
+            temperature,
+            topP: 0.92,
+            maxOutputTokens,
+            responseMimeType: 'application/json',
+            responseSchema: ANALYSIS_SCHEMA
+          }
+        })
+      });
+      if (response.ok) return response.json();
+      lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
+    } catch (error) {
+      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        lastError = new Error(`Model ${model} timed out after ${Math.round(GEMINI_GENERATE_TIMEOUT_MS / 1000)}s.`);
+        continue;
+      }
+      throw error;
+    }
   }
   throw lastError || new Error('All Gemini models failed.');
 }
@@ -652,13 +664,17 @@ async function analyzeMultipart(formData) {
         if (st.ok) {
           const meta = await st.json();
           if (meta.state && meta.state !== 'ACTIVE') {
-            const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta, 45000);
-            uploadedFile = { uri: ready.uri || fileUri, mimeType: fileMimeType || ready.mimeType };
+            try {
+              const ready = await waitGeminiFileProcessed(resource, fileMimeType, meta, 20000);
+              uploadedFile = { uri: ready.uri || fileUri, mimeType: fileMimeType || ready.mimeType };
+            } catch {
+              uploadedFile = { uri: fileUri, mimeType: fileMimeType };
+            }
           }
         }
       }
     } else if (videoBlobUrl) {
-      uploadedFile = await uploadVideoFromBlobUrl(videoBlobUrl, { waitForActive: false, maxWaitMs: 45000 });
+      throw new Error('Video is still transferring to AI. Wait a moment and tap Analyze again.');
     } else if (video && typeof video !== 'string') {
       // Last resort: file in formdata (limited to 4.5MB)
       uploadedFile = await uploadVideoFile(video);

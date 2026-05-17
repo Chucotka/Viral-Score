@@ -1786,6 +1786,8 @@
                 copied: '✓ Copied',
                 uploadStart: 'Uploading video...',
                 preparingGemini: 'Preparing video for AI (one-time transfer)...',
+                analyzingVideo: 'Analyzing your video...',
+                videoTransferFailed: 'Video is not ready yet. Wait until upload shows ready, then try again.',
                 processing: 'Waiting for processing...',
                 scoringHook: 'Scoring hook...',
                 writingRewrites: 'Writing rewrites...',
@@ -1966,6 +1968,8 @@
                 copied: '✓ Скопировано',
                 uploadStart: 'Загружаем видео...',
                 preparingGemini: 'Готовим видео для AI (разовая передача)...',
+                analyzingVideo: 'Анализируем видео...',
+                videoTransferFailed: 'Видео ещё не готово. Дождись «Готово к анализу» и нажми снова.',
                 processing: 'Ждём обработку...',
                 scoringHook: 'Оцениваем хук...',
                 writingRewrites: 'Пишем улучшения...',
@@ -3592,6 +3596,45 @@
             }, 1500);
         }
 
+        /** Fixed status during long steps (rotation would hide transfer/analyze progress). */
+        function setLoadingStage(text, options = {}) {
+            clearInterval(state.loadingInterval);
+            state.loadingInterval = null;
+            const base = String(text || t('loadingDefault'));
+            loadingTextElement.textContent = base;
+            if (!options.creep) return;
+            const started = Date.now();
+            const maxMs = Number(options.maxMs) || 280000;
+            state.loadingInterval = setInterval(() => {
+                const elapsed = Date.now() - started;
+                if (elapsed > maxMs) return;
+                const secs = Math.floor(elapsed / 1000);
+                loadingTextElement.textContent = secs >= 4 ? `${base} (${secs}s)` : base;
+            }, 2000);
+        }
+
+        function geminiResourceFromUri(fileUri) {
+            const s = String(fileUri || '').trim();
+            if (/^files\//.test(s)) return s.split('?')[0];
+            try {
+                const m = new URL(s).pathname.match(/\/(files\/[^/?]+)/);
+                return m ? m[1] : '';
+            } catch {
+                return '';
+            }
+        }
+
+        async function ensureGeminiUriReadyForAnalyze(fileUri) {
+            const name = geminiResourceFromUri(fileUri);
+            if (!name) return;
+            setLoadingStage(t('processing'), { creep: true, maxMs: 90000 });
+            try {
+                await waitForGeminiFileReady(name, null, null);
+            } catch (waitErr) {
+                console.warn('Gemini file not ACTIVE yet, trying analyze anyway:', waitErr);
+            }
+        }
+
         function startLoading(messages) {
             setScreen('loading');
             setLoadingMessages(messages);
@@ -4755,7 +4798,7 @@
             if (!state.backendUrl) throw new Error(t('backendRequired'));
             const formData = new FormData();
             const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
-            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > 10 * 1024 * 1024
+            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > VERCEL_FUNCTION_BODY_SAFE_BYTES
                 ? 'quick'
                 : state.currentMode;
             if (analysisId) formData.append('analysisId', analysisId);
@@ -4801,7 +4844,7 @@
                         }
                     }
                     if (blobUrl && !fileUri) {
-                        if (loadingTextElement) loadingTextElement.textContent = t('preparingGemini');
+                        setLoadingStage(t('preparingGemini'), { creep: true, maxMs: PROXY_UPLOAD_CLIENT_TIMEOUT_MS });
                         const transferred = await ensureGeminiFileFromBlob(
                             blobUrl,
                             fileMimeType,
@@ -4812,11 +4855,13 @@
                         state.uploadedVideoFileUri = fileUri;
                         state.uploadedVideoMimeType = fileMimeType;
                     }
+                    if (!fileUri && blobUrl) {
+                        throw new Error(t('videoTransferFailed'));
+                    }
                     if (fileUri) {
+                        await ensureGeminiUriReadyForAnalyze(fileUri);
                         formData.append('fileUri', fileUri);
                         formData.append('fileMimeType', fileMimeType);
-                    } else if (blobUrl) {
-                        formData.append('videoBlobUrl', blobUrl);
                     } else {
                         throw new Error(t('blobUploadFailed'));
                     }
@@ -4833,6 +4878,7 @@
                     : raw;
                 formData.append('text', body);
             }
+            setLoadingStage(t('analyzingVideo'), { creep: true, maxMs: ANALYSIS_TIMEOUT_MS });
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS);
             let response;
@@ -4935,7 +4981,7 @@
 
             clearFieldErrors();
             const selectedVideoSize = Number(state.selectedVideoFile?.size || 0);
-            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > 10 * 1024 * 1024
+            const effectiveMode = state.currentSourceType === 'video-file' && selectedVideoSize > VERCEL_FUNCTION_BODY_SAFE_BYTES
                 ? 'quick'
                 : state.currentMode;
             let prompt = buildAnalysisPayload('', effectiveMode);
@@ -4978,7 +5024,7 @@
 
             startLoading(
                 state.currentSourceType === 'video-file'
-                    ? [t('uploadStart'), t('processing'), t('scoringHook'), t('writingRewrites')]
+                    ? [t('preparingGemini'), t('analyzingVideo'), t('processing'), t('scoringHook'), t('writingRewrites')]
                     : [t('collectingContext'), t('scoringHook'), t('measuringRetention'), t('writingRewrites')]
             );
 
