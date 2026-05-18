@@ -563,7 +563,6 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
         responseMimeType: 'application/json',
         responseSchema: ANALYSIS_SCHEMA
       };
-      if (isVideo) generationConfig.mediaResolution = 'LOW';
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -746,7 +745,7 @@ async function analyzeMultipart(formData) {
         parts: [
           {
             file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' },
-            media_resolution: { level: 'MEDIA_RESOLUTION_LOW' }
+            media_resolution: 'MEDIA_RESOLUTION_LOW'
           },
           { text: prompt }
         ]
@@ -761,7 +760,10 @@ async function analyzeMultipart(formData) {
         requestBody = {
           contents: [{
             parts: [
-              { file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' } },
+              {
+                file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' },
+                media_resolution: 'MEDIA_RESOLUTION_LOW'
+              },
               { text: prompt }
             ]
           }]
