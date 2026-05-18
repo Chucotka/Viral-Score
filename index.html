@@ -3295,7 +3295,7 @@
 
         /** Poll /api/file-status until Gemini marks the file ACTIVE (ready for analyze). */
         async function waitForGeminiFileReady(fileResourceName, signal, onProgress) {
-            const name = String(fileResourceName || '').trim();
+            const name = normalizeGeminiFileResource(fileResourceName);
             if (!name) return;
             const statusBase = getBackendEndpointUrl('/api/file-status');
             if (!statusBase) return;
@@ -3315,9 +3315,6 @@
                     const statusRes = await fetch(statusUrl, { signal });
                     const meta = await statusRes.json().catch(() => ({}));
                     if (!statusRes.ok) {
-                        if (statusRes.status === 405 || statusRes.status === 404) {
-                            throw new Error(t('fileProcessTimeout'));
-                        }
                         continue;
                     }
                     if (meta.state === 'ACTIVE') return meta;
@@ -3673,8 +3670,19 @@
             }
         }
 
+        function normalizeGeminiFileResource(nameOrUri) {
+            const fromUri = geminiResourceFromUri(nameOrUri);
+            if (fromUri) return fromUri;
+            const s = String(nameOrUri || '').trim();
+            if (!s) return '';
+            if (/^files\/[^/?]+/i.test(s)) return s.split('?')[0];
+            if (/^file:/i.test(s)) return `files/${s.slice(5).replace(/^\/+/, '')}`;
+            if (!s.includes('/')) return `files/${s}`;
+            return s.replace(/^files?\//i, 'files/');
+        }
+
         async function waitForGeminiUriActive(fileUri, maxMs = GEMINI_FILE_READY_MAX_MS) {
-            const name = geminiResourceFromUri(fileUri);
+            const name = normalizeGeminiFileResource(fileUri);
             if (!name) return;
             const statusBase = getBackendEndpointUrl('/api/file-status');
             if (!statusBase) return;

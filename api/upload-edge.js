@@ -22,8 +22,11 @@ async function waitGeminiFileProcessed(uploadName, mimeType, partial = {}) {
   while (Date.now() - started < 120000) {
     if (delayMs) await sleep(delayMs);
     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 500;
+    let resource = String(uploadName || '').trim();
+    if (/^file:/i.test(resource)) resource = `files/${resource.slice(5).replace(/^\/+/, '')}`;
+    else if (!/^files\//i.test(resource) && resource) resource = `files/${resource}`;
     const statusRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(uploadName)}?key=${encodeURIComponent(GEMINI_API_KEY)}`
+      `https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`
     );
     if (!statusRes.ok) continue;
     const meta = await statusRes.json();

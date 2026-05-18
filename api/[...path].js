@@ -298,7 +298,9 @@ async function waitGeminiFileProcessed(uploadName, mimeType, partial = {}, maxWa
   while (Date.now() - started < maxWaitMs) {
     if (delayMs) await sleep(delayMs);
     delayMs = delayMs ? Math.min(Math.round(delayMs * 1.55), 2800) : 400;
-    const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${uploadName}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+    const statusUrl = geminiFileStatusUrl(uploadName);
+    if (!statusUrl) break;
+    const statusResponse = await fetch(statusUrl);
     if (!statusResponse.ok) continue;
     const statusData = await statusResponse.json();
     state = statusData.state;
@@ -319,6 +321,24 @@ function geminiFileResourcePath(fileUri) {
   } catch {
     return '';
   }
+}
+
+/** Gemini expects path /v1beta/files/ID — do not encode the slash as %2F. */
+function normalizeGeminiFileResource(nameOrUri) {
+  const fromPath = geminiFileResourcePath(nameOrUri);
+  if (fromPath) return fromPath;
+  const s = String(nameOrUri || '').trim();
+  if (!s) return '';
+  if (/^files\/[^/?]+/i.test(s)) return s.split('?')[0];
+  if (/^file:/i.test(s)) return `files/${s.slice(5).replace(/^\/+/, '')}`;
+  if (!s.includes('/')) return `files/${s}`;
+  return s.replace(/^files?\//i, 'files/');
+}
+
+function geminiFileStatusUrl(resourcePath) {
+  const resource = normalizeGeminiFileResource(resourcePath);
+  if (!resource) return '';
+  return `https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
 }
 
 async function getApiError(response, fallback) {
@@ -578,7 +598,9 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
 async function ensureGeminiFileActive(fileUri, mimeType, maxWaitMs = 45000) {
   const resource = geminiFileResourcePath(fileUri);
   if (!resource) return { uri: fileUri, mimeType };
-  const statusResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`);
+  const statusUrl = geminiFileStatusUrl(resource);
+  if (!statusUrl) return { uri: fileUri, mimeType };
+  const statusResponse = await fetch(statusUrl);
   if (!statusResponse.ok) return { uri: fileUri, mimeType };
   const meta = await statusResponse.json();
   if (!meta.state || meta.state === 'ACTIVE') {
@@ -1343,9 +1365,9 @@ export default async function handler(req, res) {
       if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
       const fileName = url.searchParams.get('name');
       if (!fileName) return sendJson(res, 400, { error: 'name is required.' });
-      const statusRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${encodeURIComponent(fileName)}?key=${encodeURIComponent(GEMINI_API_KEY)}`
-      );
+      const statusUrl = geminiFileStatusUrl(fileName);
+      if (!statusUrl) return sendJson(res, 400, { error: 'Invalid file name.' });
+      const statusRes = await fetch(statusUrl);
       if (!statusRes.ok) return sendJson(res, statusRes.status, { error: 'Could not get file status.' });
       return sendJson(res, 200, await statusRes.json());
     }
