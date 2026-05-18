@@ -2190,7 +2190,7 @@
             }
         };
 
-        const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
+        const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:'
             ? 'https://viral-score.vercel.app/api/analyze'
             : '/api/analyze';
@@ -5132,25 +5132,42 @@
             };
         }
 
+        function requestUsesTools(requestBody) {
+            return Array.isArray(requestBody?.tools) && requestBody.tools.length > 0;
+        }
+
+        function withJsonOutputHint(requestBody) {
+            if (!requestUsesTools(requestBody)) return requestBody;
+            const hint = 'Return ONLY one valid JSON object with all analysis fields. No markdown fences or commentary.';
+            const body = JSON.parse(JSON.stringify(requestBody));
+            const parts = body.contents?.[0]?.parts;
+            if (!Array.isArray(parts) || !parts.length) return body;
+            const textPart = [...parts].reverse().find(part => typeof part?.text === 'string');
+            if (textPart) textPart.text = `${textPart.text}\n\n${hint}`;
+            else parts.push({ text: hint });
+            return body;
+        }
+
         async function callGemini(requestBody, mode = state.currentMode) {
             let lastError = null;
             const quick = mode === 'quick';
             const ad = mode === 'ad';
             const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
             const maxOutputTokens = quick ? 1536 : 2200;
+            const usesTools = requestUsesTools(requestBody);
+            const geminiBody = usesTools ? withJsonOutputHint(requestBody) : requestBody;
+            const generationConfig = { temperature, topP: 0.92, maxOutputTokens };
+            if (!usesTools) {
+                generationConfig.responseMimeType = 'application/json';
+                generationConfig.responseSchema = ANALYSIS_SCHEMA;
+            }
             for (const model of MODEL_CANDIDATES) {
                 const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(state.apiKey)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        ...requestBody,
-                        generationConfig: {
-                            temperature,
-                            topP: 0.92,
-                            maxOutputTokens,
-                            responseMimeType: 'application/json',
-                            responseSchema: ANALYSIS_SCHEMA
-                        }
+                        ...geminiBody,
+                        generationConfig
                     })
                 });
                 if (response.ok) {

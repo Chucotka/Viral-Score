@@ -34,8 +34,42 @@ async function downloadTgFile(fileId) {
   if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
-const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-flash-preview-04-17', 'gemini-2.0-flash'];
+const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+
+function isUnavailableModelError(message) {
+  const text = String(message || '').toLowerCase();
+  return /no longer available|not found|deprecated|does not exist|is not supported|404/.test(text);
+}
+
+function requestUsesTools(requestBody) {
+  return Array.isArray(requestBody?.tools) && requestBody.tools.length > 0;
+}
+
+const JSON_OUTPUT_HINT = 'Return ONLY one valid JSON object with keys: viral_score, hook_strength, retention_score, clarity_score, shareability_score, cta_score, platform_fit_score, first_three_seconds_score, strengths, risks, suggestions, next_actions, summary, hook_insight, retention_insight, shareability_insight, platform_fit_insight, improved_hook, improved_caption, improved_cta. No markdown fences or commentary.';
+
+function withJsonOutputHint(requestBody) {
+  if (!requestUsesTools(requestBody)) return requestBody;
+  const body = JSON.parse(JSON.stringify(requestBody));
+  const parts = body.contents?.[0]?.parts;
+  if (!Array.isArray(parts) || !parts.length) return body;
+  const textPart = [...parts].reverse().find((part) => typeof part?.text === 'string');
+  if (textPart) {
+    textPart.text = `${textPart.text}\n\n${JSON_OUTPUT_HINT}`;
+  } else {
+    parts.push({ text: JSON_OUTPUT_HINT });
+  }
+  return body;
+}
+
+function buildGenerationConfig({ temperature, topP, maxOutputTokens, usesTools }) {
+  const generationConfig = { temperature, topP, maxOutputTokens };
+  if (!usesTools) {
+    generationConfig.responseMimeType = 'application/json';
+    generationConfig.responseSchema = ANALYSIS_SCHEMA;
+  }
+  return generationConfig;
+}
 const ANALYSIS_SCHEMA = {
   type: 'object',
   properties: {
@@ -567,25 +601,28 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
   const ad = mode === 'ad';
   const temperature = quick ? 0.22 : ad ? 0.34 : 0.36;
   const maxOutputTokens = isVideo ? 3072 : (quick ? 3072 : 4096);
-  const models = isVideo ? MODEL_CANDIDATES_VIDEO : (quick ? MODEL_CANDIDATES.slice(0, 1) : MODEL_CANDIDATES);
+  const models = isVideo
+    ? MODEL_CANDIDATES_VIDEO
+    : (quick ? MODEL_CANDIDATES.slice(0, 2) : MODEL_CANDIDATES);
   const timeoutMs = isVideo ? GEMINI_VIDEO_GENERATE_TIMEOUT_MS : GEMINI_GENERATE_TIMEOUT_MS;
+  const usesTools = requestUsesTools(requestBody);
+  const geminiBody = usesTools ? withJsonOutputHint(requestBody) : requestBody;
   let lastError = null;
   for (const model of models) {
     for (const tokenCap of (maxOutputTokens >= 4096 ? [maxOutputTokens] : [maxOutputTokens, 4096])) {
     try {
-      const generationConfig = {
+      const generationConfig = buildGenerationConfig({
         temperature,
         topP: 0.92,
         maxOutputTokens: tokenCap,
-        responseMimeType: 'application/json',
-        responseSchema: ANALYSIS_SCHEMA
-      };
+        usesTools
+      });
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(timeoutMs),
         body: JSON.stringify({
-          ...requestBody,
+          ...geminiBody,
           generationConfig
         })
       });
@@ -599,6 +636,7 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
         return data;
       }
       lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
+      if (isUnavailableModelError(lastError.message)) continue;
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
         lastError = new Error(`Model ${model} timed out after ${Math.round(timeoutMs / 1000)}s.`);
