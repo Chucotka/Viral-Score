@@ -688,11 +688,17 @@ async function callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, 
 }
 
 function extractModelText(data) {
-  const part = data?.candidates?.[0]?.content?.parts?.[0];
-  if (!part) throw new Error('Gemini returned an empty response.');
-  if (typeof part.text === 'string') return part.text.trim();
-  if (typeof part.inlineData?.data === 'string') return part.inlineData.data.trim();
-  return JSON.stringify(part);
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  if (!parts.length) throw new Error('Gemini returned an empty response.');
+  const text = parts
+    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+  if (text) return text;
+  const inline = parts.find((part) => typeof part?.inlineData?.data === 'string');
+  if (inline) return inline.inlineData.data.trim();
+  return JSON.stringify(parts[0]);
 }
 
 function parseModelJson(text) {
@@ -857,10 +863,23 @@ async function analyzeMultipart(formData) {
   }
 
   const hasUploadedVideo = requestBody?.contents?.[0]?.parts?.some((p) => p.file_data?.file_uri);
-  const data = sourceType === 'video-file' || hasUploadedVideo
+  let data = sourceType === 'video-file' || hasUploadedVideo
     ? await callGeminiForVideoAnalysis(requestBody, mode, { prompt, context, language })
     : await callGemini(requestBody, mode, { isVideo: false });
-  const result = normalizeResult(parseModelJson(extractModelText(data)));
+  let result;
+  try {
+    result = normalizeResult(parseModelJson(extractModelText(data)));
+  } catch (parseError) {
+    if (sourceType === 'video-url' && requestUsesTools(requestBody)) {
+      const fallbackBody = {
+        contents: requestBody.contents
+      };
+      data = await callGemini(fallbackBody, mode, { isVideo: false });
+      result = normalizeResult(parseModelJson(extractModelText(data)));
+    } else {
+      throw parseError;
+    }
+  }
 
   client.usageCount += 1;
   const savedAnalysis = {

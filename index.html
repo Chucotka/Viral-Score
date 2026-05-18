@@ -5284,11 +5284,17 @@
         }
 
         function extractModelText(data) {
-            const part = data?.candidates?.[0]?.content?.parts?.[0];
-            if (!part) throw new Error(t('emptyGemini'));
-            if (typeof part.text === 'string') return part.text.trim();
-            if (typeof part.inlineData?.data === 'string') return part.inlineData.data.trim();
-            return JSON.stringify(part);
+            const parts = data?.candidates?.[0]?.content?.parts || [];
+            if (!parts.length) throw new Error(t('emptyGemini'));
+            const text = parts
+                .map(part => (typeof part?.text === 'string' ? part.text : ''))
+                .filter(Boolean)
+                .join('\n')
+                .trim();
+            if (text) return text;
+            const inline = parts.find(part => typeof part?.inlineData?.data === 'string');
+            if (inline) return inline.inlineData.data.trim();
+            return JSON.stringify(parts[0]);
         }
 
         function parseModelJson(text) {
