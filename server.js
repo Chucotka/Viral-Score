@@ -581,10 +581,7 @@ async function analyzeMultipart(formData) {
     requestBody = {
       contents: [{
         parts: [
-          {
-            file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' },
-            media_resolution: 'MEDIA_RESOLUTION_LOW'
-          },
+          { file_data: { file_uri: uploadedFile.uri, mime_type: uploadedFile.mimeType || 'video/mp4' } },
           { text: prompt }
         ]
       }]
