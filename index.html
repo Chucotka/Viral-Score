@@ -1793,6 +1793,7 @@
                 writingRewrites: 'Writing rewrites...',
                 collectingContext: 'Collecting context...',
                 measuringRetention: 'Measuring retention...',
+                translatingResults: 'Translating results...',
                 chooseVideoFirst: 'Choose a video file first.',
                 pasteLinkFirst: 'Paste a video or post link first.',
                 pasteTextFirst: 'Paste your caption, transcript, or script first.',
@@ -1950,7 +1951,7 @@
                 current: 'Текущий',
                 hook: 'Хук',
                 retention: 'Удержание',
-                viral: 'Viral',
+                viral: 'Виральность',
                 clarity: 'Ясность',
                 shares: 'Шеры',
                 cta: 'CTA',
@@ -1959,13 +1960,13 @@
                 clarityNote: 'Насколько быстро считывается смысл.',
                 ctaNote: 'Насколько хорошо контент ведёт к действию.',
                 first3sNote: 'Насколько сильно цепляет начало.',
-                noSummary: 'Gemini не вернул summary.',
-                noStrengths: 'Gemini не вернул сильные стороны.',
-                noRisks: 'Gemini не вернул риски.',
-                fallbackSuggestion: 'Усиль хук, ускорь темп и сделай payoff яснее.',
-                noHook: 'Gemini не вернул новый хук.',
-                noCaption: 'Gemini не вернул новый caption.',
-                noCta: 'Gemini не вернул CTA.',
+                noSummary: 'Краткое резюме не получено.',
+                noStrengths: 'Сильные стороны не получены.',
+                noRisks: 'Риски не получены.',
+                fallbackSuggestion: 'Усиль хук, ускорь темп и сделай финал яснее.',
+                noHook: 'Новый хук не получен.',
+                noCaption: 'Новый текст поста не получен.',
+                noCta: 'Призыв к действию не получен.',
                 copied: '✓ Скопировано',
                 uploadStart: 'Загружаем видео...',
                 preparingGemini: 'Готовим видео для AI (разовая передача)...',
@@ -1976,6 +1977,7 @@
                 writingRewrites: 'Пишем улучшения...',
                 collectingContext: 'Собираем контекст...',
                 measuringRetention: 'Считаем удержание...',
+                translatingResults: 'Переводим результат...',
                 chooseVideoFirst: 'Сначала выбери видеофайл.',
                 pasteLinkFirst: 'Сначала вставь ссылку на видео или пост.',
                 pasteTextFirst: 'Сначала вставь caption, транскрипт или сценарий.',
@@ -2168,6 +2170,7 @@
             loadingMessages: [],
             lastAnalysisResult: null,
             lastAnalysisMeta: null,
+            analysisTranslations: {},
             history: loadHistory()
         };
         safeStorage.setItem(STORAGE_KEYS.clientId, state.clientId);
@@ -2177,7 +2180,42 @@
             return typeof value === 'function' ? value(...args) : value;
         }
 
-        function applyLanguage(lang) {
+        async function ensureAnalysisResultLanguage() {
+            const meta = state.lastAnalysisMeta || {};
+            if (!state.lastAnalysisResult) return;
+            if (meta.language === state.lang) return;
+            const cacheId = meta.id || 'last';
+            if (!state.analysisTranslations[cacheId]) {
+                state.analysisTranslations[cacheId] = {};
+            }
+            const cache = state.analysisTranslations[cacheId];
+            const sourceLang = meta.language || 'en';
+            if (!cache[sourceLang]) {
+                cache[sourceLang] = state.lastAnalysisResult;
+            }
+            if (cache[state.lang]) {
+                state.lastAnalysisResult = cache[state.lang];
+                state.lastAnalysisMeta = { ...meta, language: state.lang };
+                return;
+            }
+            const translateUrl = getBackendEndpointUrl('/api/translate-result');
+            if (!translateUrl) return;
+            const response = await fetch(translateUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ result: state.lastAnalysisResult, language: state.lang })
+            });
+            if (!response.ok) {
+                throw new Error(await getApiError(response, 'Translation failed'));
+            }
+            const data = await response.json();
+            const translated = normalizeAnalysisResult(data.result || data);
+            cache[state.lang] = translated;
+            state.lastAnalysisResult = translated;
+            state.lastAnalysisMeta = { ...meta, language: state.lang };
+        }
+
+        async function applyLanguage(lang) {
             state.lang = lang === 'ru' ? 'ru' : 'en';
             safeStorage.setItem(STORAGE_KEYS.lang, state.lang);
             document.documentElement.lang = state.lang;
@@ -2189,8 +2227,26 @@
             updateLinkPreview();
             setSourceType(state.currentSourceType, false);
             renderHistory();
+            const onResults = screens.results?.classList.contains('active');
+            if (state.lastAnalysisResult && state.lastAnalysisMeta?.language !== state.lang) {
+                if (onResults) {
+                    startLoading([t('translatingResults')]);
+                }
+                try {
+                    await ensureAnalysisResultLanguage();
+                } catch (err) {
+                    console.warn('Result translation failed:', err);
+                } finally {
+                    if (onResults) {
+                        stopLoading();
+                    }
+                }
+            }
             if (state.lastAnalysisResult) {
                 renderResults(state.lastAnalysisResult, state.lastAnalysisMeta);
+                if (onResults) {
+                    setScreen('results');
+                }
             }
             renderBackendStatusPill();
             syncPaymentButtons();
@@ -3600,7 +3656,10 @@
                     : 'Keep every text field short: one sentence for insights, no more than 4 suggestions, no markdown.',
                 russian
                     ? 'Рекомендации должны улучшать удержание, шеры и клики.'
-                    : 'Base recommendations on what most improves watch time, shares, and click-through.'
+                    : 'Base recommendations on what most improves watch time, shares, and click-through.',
+                russian
+                    ? 'Все строковые поля JSON (summary, insights, strengths, risks, suggestions, improved_*) только на русском — без английского.'
+                    : 'All string fields in the JSON must be in English only — no mixed languages.'
             ].join(' ');
         }
 
@@ -4484,15 +4543,20 @@
         }
 
         function saveCurrentAnalysis(result, meta, entryId = null) {
+            const entryIdFinal = entryId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
             const entry = {
-                id: entryId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+                id: entryIdFinal,
                 createdAt: new Date().toISOString(),
                 platform: meta.platform,
                 mode: meta.mode,
                 sourceLabel: meta.sourceLabel,
                 sourceType: meta.sourceType,
+                language: meta.language || state.lang,
                 viral_score: result.viral_score,
                 result
+            };
+            state.analysisTranslations[entryIdFinal] = {
+                [entry.language]: result
             };
             pushHistory(entry);
         }
@@ -4502,10 +4566,12 @@
             if (!entry) return;
             state.lastAnalysisResult = entry.result;
             state.lastAnalysisMeta = {
+                id: entry.id,
                 platform: entry.platform,
                 mode: entry.mode,
                 sourceLabel: entry.sourceLabel,
-                sourceType: entry.sourceType
+                sourceType: entry.sourceType,
+                language: entry.language || state.lang
             };
             renderResults(entry.result, state.lastAnalysisMeta);
             setScreen('results');
@@ -5155,10 +5221,12 @@
                 }
                 state.lastAnalysisResult = parsed;
                 state.lastAnalysisMeta = {
+                    id: analysisId,
                     platform: state.currentPlatform,
                     mode: effectiveMode,
                     sourceLabel: getSourceLabel(),
-                    sourceType: state.currentSourceType
+                    sourceType: state.currentSourceType,
+                    language: state.lang
                 };
                 saveCurrentAnalysis(parsed, state.lastAnalysisMeta, usedBackend ? analysisId : null);
                 if (!usedBackend) {
@@ -5191,7 +5259,9 @@
         }
 
         function attachEvents() {
-            languageButtons.forEach(button => button.addEventListener('click', () => applyLanguage(button.dataset.lang)));
+            languageButtons.forEach(button => button.addEventListener('click', () => {
+                applyLanguage(button.dataset.lang).catch(err => console.error(err));
+            }));
             settingsBtn.addEventListener('click', openSettings);
             closeSettingsBtn.addEventListener('click', closeSettings);
             billingModeButtons.forEach(button => button.addEventListener('click', () => setBillingMode(button.dataset.billing)));

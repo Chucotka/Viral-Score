@@ -212,8 +212,25 @@ function getPromptBase({ platform, mode, sourceType, language, context }) {
     sourceGuides[sourceType] || sourceGuides.text,
     russian ? 'Верни только валидный JSON по заданной схеме. Все оценки должны быть целыми числами от 0 до 100.' : 'Return only valid JSON that matches the provided schema. All scores must be integers from 0 to 100.',
     russian ? 'Все текстовые поля должны быть короткими: одна фраза для insight, максимум 4 suggestions, без markdown.' : 'Keep every text field short: one sentence for insights, no more than 4 suggestions, no markdown.',
-    russian ? 'Рекомендации должны улучшать удержание, шеры и клики.' : 'Base recommendations on what most improves watch time, shares, and click-through.'
+    russian ? 'Рекомендации должны улучшать удержание, шеры и клики.' : 'Base recommendations on what most improves watch time, shares, and click-through.',
+    russian
+      ? 'Все строковые поля JSON (summary, hook_insight, retention_insight, shareability_insight, platform_fit_insight, strengths, risks, suggestions, next_actions, improved_hook, improved_caption, improved_cta) пиши только на русском — без английских фраз.'
+      : 'Write every string field in the JSON (summary, insights, strengths, risks, suggestions, next_actions, improved_*) in English only — no mixed languages.'
   ].join(' ');
+}
+
+async function translateAnalysisResult(result, language) {
+  const russian = language === 'ru';
+  const instruction = russian
+    ? 'Переведи на русский язык все текстовые поля в JSON ниже. Числовые оценки (0–100) не меняй. Верни только валидный JSON той же структуры.'
+    : 'Translate all text fields in the JSON below to English. Do not change numeric scores (0–100). Return only valid JSON with the same structure.';
+  const requestBody = {
+    contents: [{
+      parts: [{ text: `${instruction}\n\n${JSON.stringify(result)}` }]
+    }]
+  };
+  const data = await callGemini(requestBody, 'quick', { isVideo: false });
+  return normalizeResult(parseModelJson(extractModelText(data)));
 }
 
 function isDirectVideoUrl(value) {
@@ -1408,6 +1425,18 @@ export default async function handler(req, res) {
       if (!requestBody) return sendJson(res, 400, { error: 'requestBody is required.' });
       const data = await callGemini(requestBody, mode || 'pro');
       return sendJson(res, 200, data);
+    }
+
+    if (req.method === 'POST' && path === '/api/translate-result') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const body = await readJson(req, url);
+      const result = body?.result;
+      const language = String(body?.language || 'en');
+      if (!result || typeof result !== 'object') {
+        return sendJson(res, 400, { error: 'result object is required.' });
+      }
+      const translated = await translateAnalysisResult(normalizeResult(result), language);
+      return sendJson(res, 200, { result: translated, language });
     }
 
     if (req.method === 'POST' && path === '/api/analyze') {
