@@ -639,19 +639,26 @@
             padding: 16px;
             margin-bottom: 20px;
             opacity: 0;
+            overflow: hidden;
+            max-width: 100%;
         }
 
         .summary-kicker {
-            font-size: 12px;
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.8px;
+            letter-spacing: 0.06em;
             color: var(--text-muted);
             margin-bottom: 8px;
+            line-height: 1.45;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .summary-text {
             font-size: 15px;
             line-height: 1.6;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .stat-grid {
@@ -687,6 +694,8 @@
             font-size: 12px;
             line-height: 1.45;
             color: var(--text-muted);
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .asset-grid {
@@ -715,6 +724,8 @@
             line-height: 1.6;
             white-space: pre-wrap;
             margin-bottom: 12px;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
 
         .compare-card {
@@ -745,6 +756,9 @@
         .compare-pill span {
             display: block;
             font-size: 12px;
+            line-height: 1.4;
+            word-break: break-word;
+            overflow-wrap: anywhere;
             color: var(--text-muted);
             line-height: 1.4;
         }
@@ -831,11 +845,26 @@
         }
 
         /* Results Screen */
+        #results-screen {
+            min-width: 0;
+            overflow-x: hidden;
+        }
+
+        .gauge-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 100%;
+            margin: 0 auto 28px;
+        }
+
         .gauge-container {
             position: relative;
-            width: 160px;
-            height: 160px;
-            margin: 0 auto 32px;
+            width: min(172px, 46vw);
+            height: min(172px, 46vw);
+            flex-shrink: 0;
+            margin: 0;
         }
 
         .gauge-svg {
@@ -862,26 +891,53 @@
 
         .gauge-text {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            inset: 0;
             display: flex;
-            flex-direction: column;
-            justify-content: center;
             align-items: center;
+            justify-content: center;
+            padding: 18px;
+            box-sizing: border-box;
+            pointer-events: none;
         }
 
         .gauge-score {
-            font-size: 48px;
+            font-size: clamp(40px, 11vw, 56px);
             font-weight: 700;
             line-height: 1;
+            letter-spacing: -0.02em;
         }
 
-        .gauge-label {
+        .gauge-badge {
+            width: 100%;
+            max-width: min(100%, 340px);
+            margin-top: 14px;
+            padding: 10px 16px;
+            border-radius: 999px;
+            text-align: center;
             font-size: 14px;
-            font-weight: 500;
-            margin-top: 4px;
+            font-weight: 600;
+            line-height: 1.35;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            box-sizing: border-box;
+        }
+
+        .gauge-badge-emoji {
+            display: block;
+            font-size: 18px;
+            line-height: 1.2;
+            margin-bottom: 2px;
+        }
+
+        .gauge-badge-emoji:empty {
+            display: none;
+            margin: 0;
+        }
+
+        .gauge-badge-text {
+            display: block;
         }
 
         .breakdown-grid {
@@ -1474,14 +1530,19 @@
                 <div class="summary-text" id="analysis-summary-text"></div>
             </div>
 
-            <div class="gauge-container" style="--order: 0">
-                <svg viewBox="0 0 100 100" class="gauge-svg">
-                    <circle cx="50" cy="50" r="45" class="gauge-bg"></circle>
-                    <circle cx="50" cy="50" r="45" class="gauge-fill" id="gauge-fill"></circle>
-                </svg>
-                <div class="gauge-text">
-                    <div class="gauge-score" id="viral-score">0</div>
-                    <div class="gauge-label" id="viral-label" data-i18n="score">Score</div>
+            <div class="gauge-wrap fade-in-up" style="animation-delay: 150ms;">
+                <div class="gauge-container">
+                    <svg viewBox="0 0 100 100" class="gauge-svg" aria-hidden="true">
+                        <circle cx="50" cy="50" r="45" class="gauge-bg"></circle>
+                        <circle cx="50" cy="50" r="45" class="gauge-fill" id="gauge-fill"></circle>
+                    </svg>
+                    <div class="gauge-text" aria-hidden="true">
+                        <div class="gauge-score" id="viral-score">0</div>
+                    </div>
+                </div>
+                <div class="gauge-badge" id="viral-label" aria-live="polite">
+                    <span class="gauge-badge-emoji" id="viral-label-emoji"></span>
+                    <span class="gauge-badge-text" id="viral-label-text"></span>
                 </div>
             </div>
 
@@ -1712,6 +1773,8 @@
         const analysisSummaryText = document.getElementById('analysis-summary-text');
         const viralScoreEl = document.getElementById('viral-score');
         const viralLabelEl = document.getElementById('viral-label');
+        const viralLabelEmojiEl = document.getElementById('viral-label-emoji');
+        const viralLabelTextEl = document.getElementById('viral-label-text');
         const gaugeFill = document.getElementById('gauge-fill');
         const suggestionsList = document.getElementById('suggestions-list');
         const strengthsList = document.getElementById('strengths-list');
@@ -2537,6 +2600,20 @@
             if (score >= 71) return '🔥 High potential';
             if (score >= 41) return 'Good potential';
             return 'Low potential';
+        }
+
+        function getScoreLabelParts(score) {
+            const full = getScoreLabel(score);
+            if (full.startsWith('🔥 ')) return { emoji: '🔥', text: full.slice(2) };
+            return { emoji: '', text: full };
+        }
+
+        function setViralScoreLabel(score) {
+            const color = getScoreColor(score);
+            const { emoji, text } = getScoreLabelParts(score);
+            if (viralLabelEmojiEl) viralLabelEmojiEl.textContent = emoji;
+            if (viralLabelTextEl) viralLabelTextEl.textContent = text;
+            if (viralLabelEl) viralLabelEl.style.color = color;
         }
 
         function getUrlPlatformForLink(value) {
@@ -4783,6 +4860,7 @@
         function renderResults(data, meta = state.lastAnalysisMeta || {}) {
             [
                 document.getElementById('analysis-summary-card'),
+                document.querySelector('.gauge-wrap'),
                 document.querySelector('.suggestions'),
                 document.querySelector('.improved-version'),
                 document.querySelector('.results-dock'),
@@ -4793,8 +4871,7 @@
             viralScoreEl.textContent = '0';
             gaugeFill.style.strokeDashoffset = 283;
             gaugeFill.style.stroke = color;
-            viralLabelEl.textContent = getScoreLabel(score);
-            viralLabelEl.style.color = color;
+            setViralScoreLabel(score);
 
             const modeLabel = getModeLabel(meta.mode || state.currentMode);
             analysisSummaryKicker.textContent = meta.sourceLabel ? `${meta.sourceLabel} · ${meta.platform || state.currentPlatform} · ${modeLabel}` : t('analysis');
