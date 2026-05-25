@@ -17,7 +17,7 @@ Health check:
 ```txt
 GET /health
 ```
-Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false, "blobConfigured": true|false, "kvConfigured": true|false, "storeBackend": "kv"|"memory" }`.
+Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false, "blobConfigured": true|false, "redisConfigured": true|false, "kvConfigured": true|false, "storeBackend": "redis"|"memory" }`.
 On Vercel, `/health` rewrites to the API route that serves this response.
 
 Vercel Blob client token:

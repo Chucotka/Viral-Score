@@ -52,9 +52,11 @@ The project also ships with Vercel API routes, so the production app can run on 
 
 ### Persistent storage (recommended)
 
-Link **Vercel KV** (or Upstash Redis) to the project. Vercel injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+Connect **Upstash Redis** from the Vercel Marketplace (Storage → your existing `upstash-kv-…` store → Connect to Project). Vercel injects `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Legacy `KV_REST_API_*` names still work.
 
-Without KV, client quotas, unlock state, and history live in **per-instance memory** and reset on cold starts.
+Do not install deprecated `@vercel/kv` — this app uses `@upstash/redis` directly.
+
+Without Redis, client quotas, unlock state, and history live in **per-instance memory** and reset on cold starts.
 
 Optional env:
 

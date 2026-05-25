@@ -948,6 +948,7 @@ const server = http.createServer(async (req, res) => {
         geminiConfigured: Boolean(GEMINI_API_KEY),
         botConfigured: Boolean(BOT_TOKEN),
         blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN),
+        redisConfigured: isKvConfigured(),
         kvConfigured: isKvConfigured(),
         storeBackend: getStoreBackend(),
         botUsername: BOT_USERNAME || '',
