@@ -7,6 +7,7 @@ export const maxDuration = 300;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const UNLOCK_SECRET = process.env.UNLOCK_SECRET || '';
 const BOT_USERNAME = process.env.BOT_USERNAME || 'viral_score_bot';
 const VK_APP_ID = process.env.VK_APP_ID || '';
 const VK_APP_SECRET = process.env.VK_APP_SECRET || '';
@@ -250,6 +251,7 @@ function getPromptBase({ platform, mode, sourceType, language, context }) {
     sourceGuides[sourceType] || sourceGuides.text,
     russian ? 'Верни только валидный JSON по заданной схеме. Все оценки должны быть целыми числами от 0 до 100.' : 'Return only valid JSON that matches the provided schema. All scores must be integers from 0 to 100.',
     russian ? 'Все текстовые поля должны быть короткими: одна фраза для insight, максимум 4 suggestions, без markdown.' : 'Keep every text field short: one sentence for insights, no more than 4 suggestions, no markdown.',
+    russian ? 'Массивы strengths и risks обязательны: в каждом минимум 2 конкретных пункта, не оставляй пустыми.' : 'strengths and risks are required: include at least 2 specific items in each array, never leave them empty.',
     russian ? 'Рекомендации должны улучшать удержание, шеры и клики.' : 'Base recommendations on what most improves watch time, shares, and click-through.',
     russian
       ? 'Все строковые поля JSON (summary, hook_insight, retention_insight, shareability_insight, platform_fit_insight, strengths, risks, suggestions, next_actions, improved_hook, improved_caption, improved_cta) пиши только на русском — без английских фраз.'
@@ -867,7 +869,6 @@ async function analyzeMultipart(formData) {
   const language = String(formData.get('language') || 'en');
   const context = String(formData.get('context') || '').trim();
   const freeLimit = Math.max(0, Number(formData.get('freeLimit') || '3'));
-  const accessUnlocked = String(formData.get('accessUnlocked') || '') === '1';
   const prompt = String(formData.get('prompt') || getPromptBase({ platform, mode, sourceType, language, context }));
   const video = formData.get('video');
   const url = String(formData.get('url') || '');
@@ -878,7 +879,6 @@ async function analyzeMultipart(formData) {
   const client = ensureClientRecord(clientId);
   if (!client) throw new Error('clientId is required.');
   client.lastSeenAt = new Date().toISOString();
-  client.accessUnlocked = client.accessUnlocked || accessUnlocked;
 
   if (!client.accessUnlocked && freeLimit > 0 && client.usageCount >= freeLimit) {
     const error = new Error('Free quota ended.');
@@ -1070,6 +1070,20 @@ function getClientStatus(clientId) {
     lastSeenAt: client?.lastSeenAt || null,
     lastAnalysis: client?.lastAnalysis || null
   };
+}
+
+function assertUnlockAuthorized(req, body = {}) {
+  if (!UNLOCK_SECRET) {
+    const error = new Error('UNLOCK_SECRET is not configured on the server.');
+    error.statusCode = 503;
+    throw error;
+  }
+  const headerSecret = String(req.headers['x-unlock-secret'] || req.headers['X-Unlock-Secret'] || '').trim();
+  const bodySecret = String(body?.unlockSecret || '').trim();
+  if (headerSecret === UNLOCK_SECRET || bodySecret === UNLOCK_SECRET) return;
+  const error = new Error('Unauthorized unlock request.');
+  error.statusCode = 401;
+  throw error;
 }
 
 function unlockClientAccess(clientId, method = 'stars') {
@@ -1683,6 +1697,11 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && path === '/api/unlock') {
       const body = await readJson(req, url);
+      try {
+        assertUnlockAuthorized(req, body);
+      } catch (authError) {
+        return sendJson(res, authError.statusCode || 401, { error: authError.message });
+      }
       const clientId = normalizeClientId(body?.clientId);
       if (!clientId) return sendJson(res, 400, { error: 'clientId is required.' });
       return sendJson(res, 200, unlockClientAccess(clientId, body?.method));

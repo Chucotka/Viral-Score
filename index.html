@@ -526,6 +526,13 @@
             margin-top: 8px;
         }
 
+        .mode-hint {
+            margin: 10px 0 4px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
         .url-input-row {
             display: flex;
             align-items: stretch;
@@ -1480,6 +1487,7 @@
                     <button data-mode="pro" data-i18n="modePro">Pro</button>
                     <button data-mode="ad" data-i18n="modeAd">Ad</button>
                 </div>
+                <p class="mode-hint" id="mode-hint"></p>
 
                 <button class="primary-btn" id="analyze-btn"><span data-i18n="analyzeButton">Analyze viral score</span> &rarr;</button>
                 <div id="main-error" class="error-message"></div>
@@ -1791,6 +1799,7 @@
         const resultsHistoryList = document.getElementById('results-history-list');
         const sourceButtons = document.querySelectorAll('#source-selector button');
         const modeButtons = document.querySelectorAll('#analysis-mode-selector button');
+        const modeHintEl = document.getElementById('mode-hint');
         const platformButtons = document.querySelectorAll('#platform-selector .pill');
         const pasteLinkBtn = document.getElementById('paste-link-btn');
         const videoUploadBlock = document.getElementById('video-upload-block');
@@ -1877,6 +1886,10 @@
                 modeQuick: 'Quick',
                 modePro: 'Pro',
                 modeAd: 'Ad',
+                modeHintQuick: 'Fast overview with practical fixes.',
+                modeHintPro: 'Detailed creator analysis with specific next steps.',
+                modeHintAd: 'For ads and paid creatives: hook, retention, clarity, and conversion matter most.',
+                unlockPending: 'Payment received. Waiting for server confirmation — try again in a few seconds or tap Retry.',
                 analyzeButton: 'Analyze viral score',
                 analyzeLoading: 'Analyzing...',
                 appTitle: '⚡ Viral Score',
@@ -2082,6 +2095,10 @@
                 modeQuick: 'Быстро',
                 modePro: 'Про',
                 modeAd: 'Реклама',
+                modeHintQuick: 'Быстрый обзор с практичными правками.',
+                modeHintPro: 'Подробный разбор с конкретными шагами для автора.',
+                modeHintAd: 'Для рекламы и таргета: важны хук, удержание, ясность оффера и конверсия.',
+                unlockPending: 'Оплата прошла. Ждём подтверждение сервера — подожди несколько секунд или нажми «Повторить».',
                 analyzeButton: 'Оценить viral score',
                 analyzeLoading: 'Анализируем...',
                 appTitle: '⚡ Viral Score',
@@ -2480,6 +2497,7 @@
             });
             refreshMonetizationHints();
             updateLinkPreview();
+            updateModeHint();
             setSourceType(state.currentSourceType, false);
             renderHistory();
             const onResults = screens.results?.classList.contains('active');
@@ -3955,7 +3973,10 @@
                     : 'Base recommendations on what most improves watch time, shares, and click-through.',
                 russian
                     ? 'Все строковые поля JSON (summary, insights, strengths, risks, suggestions, improved_*) только на русском — без английского.'
-                    : 'All string fields in the JSON must be in English only — no mixed languages.'
+                    : 'All string fields in the JSON must be in English only — no mixed languages.',
+                russian
+                    ? 'Массивы strengths и risks обязательны: в каждом минимум 2 конкретных пункта, не оставляй пустыми.'
+                    : 'strengths and risks are required: include at least 2 specific items in each array, never leave them empty.'
             ].join(' ');
         }
 
@@ -4171,10 +4192,19 @@
             if (persistDraft) saveDraft();
         }
 
+        function updateModeHint() {
+            if (!modeHintEl) return;
+            const key = state.currentMode === 'ad'
+                ? 'modeHintAd'
+                : (state.currentMode === 'pro' ? 'modeHintPro' : 'modeHintQuick');
+            modeHintEl.textContent = t(key);
+        }
+
         function setMode(mode) {
             state.currentMode = mode;
             safeStorage.setItem(STORAGE_KEYS.lastMode, mode);
             modeButtons.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+            updateModeHint();
         }
 
         function setBillingMode(mode) {
@@ -4712,9 +4742,9 @@
                     state.usageCount = data.usageCount;
                     safeStorage.setItem(STORAGE_KEYS.usageCount, String(state.usageCount));
                 }
-                if (data.accessUnlocked === true) {
+                if (typeof data.accessUnlocked === 'boolean') {
                     state.accessUnlocked = data.accessUnlocked;
-                    safeStorage.setItem(STORAGE_KEYS.accessUnlocked, '1');
+                    safeStorage.setItem(STORAGE_KEYS.accessUnlocked, data.accessUnlocked ? '1' : '0');
                 }
                 updateQuotaLabel();
                 renderLaunchChecklist();
@@ -4775,26 +4805,27 @@
             return paramUsername || savedUsername;
         }
 
-        function unlockAccess(method) {
-            state.accessUnlocked = true;
-            safeStorage.setItem(STORAGE_KEYS.accessUnlocked, '1');
-            updateQuotaLabel();
-            if (state.backendUrl && state.clientId) {
-                const _unlockEndpoint = getBackendEndpointUrl('/api/unlock');
-                if (!_unlockEndpoint) return;
-                const unlockUrl = new URL(_unlockEndpoint);
-                fetch(unlockUrl.toString(), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ clientId: state.clientId, method })
-                }).catch(() => {});
-            }
-            if (tg && tg.HapticFeedback) {
+        async function confirmUnlockAfterPayment(method = 'stars') {
+            if (tg?.HapticFeedback) {
                 tg.HapticFeedback.notificationOccurred('success');
             }
-            if (tg && tg.showAlert) {
-                tg.showAlert(method === 'stars' ? t('paidWithStars') : (state.lang === 'ru' ? 'Доступ открыт. Теперь можно продолжать пользоваться приложением.' : 'Access unlocked. You can continue using the app.'));
+            for (let attempt = 0; attempt < 15; attempt += 1) {
+                await syncServerStatus();
+                if (state.accessUnlocked) {
+                    updateQuotaLabel();
+                    syncPaymentButtons();
+                    if (tg?.showAlert) {
+                        tg.showAlert(method === 'stars' ? t('paidWithStars') : (state.lang === 'ru'
+                            ? 'Доступ открыт. Можно продолжать анализ.'
+                            : 'Access unlocked. You can continue analyzing.'));
+                    }
+                    return;
+                }
+                await sleep(attempt < 3 ? 1000 : 2000);
             }
+            mainError.textContent = t('unlockPending');
+            mainError.style.display = 'block';
+            if (errorActions) errorActions.classList.remove('hidden');
         }
 
         function openStarsCheckout() {
@@ -4809,7 +4840,7 @@
             }
             tg.openInvoice(state.starsInvoiceUrl, status => {
                 if (status === 'paid') {
-                    unlockAccess('stars');
+                    confirmUnlockAfterPayment('stars').catch(err => console.error(err));
                 }
             });
         }
@@ -5329,7 +5360,6 @@
             formData.append('context', contextInput.value.trim());
             formData.append('prompt', buildAnalysisPayload('', effectiveMode));
             formData.append('freeLimit', String(state.freeLimit));
-            formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
                 if (state.uploadedVideoBlobUrl) {
                     formData.append('videoBlobUrl', state.uploadedVideoBlobUrl);
@@ -5490,6 +5520,10 @@
                 mainError.style.display = 'block';
                 if (errorActions) errorActions.classList.add('hidden');
                 return;
+            }
+
+            if (state.backendUrl && state.clientId) {
+                await syncServerStatus();
             }
 
             if (!state.accessUnlocked && state.freeLimit > 0 && state.usageCount >= state.freeLimit) {

@@ -68,11 +68,15 @@ History sync:
 GET /api/history?clientId=...
 ```
 
-Unlock access:
+Unlock access (server-side only — requires `UNLOCK_SECRET`):
 
 ```txt
 POST /api/unlock
+Header: X-Unlock-Secret: <UNLOCK_SECRET>
+Body: { "clientId": "...", "method": "card", "unlockSecret": "<UNLOCK_SECRET>" }
 ```
+
+Telegram Stars unlocks via `POST /api/telegram-webhook` on `successful_payment` (no client call to `/api/unlock`).
 
 Payment payload:
 
@@ -114,8 +118,7 @@ Fields:
 - `language`: `en` or `ru`
 - `context`: optional extra user context
 - `prompt`: the assembled analysis prompt
-- `freeLimit`: current free quota value from the client
-- `accessUnlocked`: `1` or `0`
+- `freeLimit`: current free quota value from the client (server enforces quota; do not trust client unlock flags)
 - `video`: file, only for `video-file`
 - `url`: post/video URL, only for `video-url`
 - `text`: caption/transcript/script, only for `text`
