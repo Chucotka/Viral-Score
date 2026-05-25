@@ -50,6 +50,18 @@ After a successful card payment, call `POST /api/unlock` with header `X-Unlock-S
 
 The project also ships with Vercel API routes, so the production app can run on `https://viral-score.vercel.app` without a separate backend server. On Vercel, the frontend uses `/api/analyze` and `/health` directly from the same deployment.
 
+### Persistent storage (recommended)
+
+Link **Vercel KV** (or Upstash Redis) to the project. Vercel injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` automatically.
+
+Without KV, client quotas, unlock state, and history live in **per-instance memory** and reset on cold starts.
+
+Optional env:
+
+```bash
+RATE_LIMIT_ANALYZE_PER_HOUR=40
+```
+
 ## Production
 
 - Keep `GEMINI_API_KEY` only on the server.

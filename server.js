@@ -4,6 +4,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { del } from '@vercel/blob';
+import {
+  ensureClientRecord,
+  saveClient,
+  normalizeClientId as storeNormalizeClientId,
+  isKvConfigured,
+  getStoreBackend
+} from './lib/client-store.js';
+import { assertRateLimit } from './lib/rate-limit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -633,8 +641,14 @@ async function analyzeMultipart(formData) {
   const video = formData.get('video');
   const url = String(formData.get('url') || '');
   const text = String(formData.get('text') || '');
-  const serverState = await loadServerState();
-  const client = getClientRecord(serverState, clientId);
+  const useKv = isKvConfigured();
+  const serverState = useKv ? null : await loadServerState();
+  const client = useKv
+    ? await ensureClientRecord(clientId)
+    : getClientRecord(serverState, clientId);
+  if (useKv) {
+    await assertRateLimit(clientId, 'analyze');
+  }
   client.lastSeenAt = new Date().toISOString();
   if (!client.accessUnlocked && freeLimit > 0 && client.usageCount >= freeLimit) {
     const error = new Error('Free quota ended.');
@@ -775,7 +789,12 @@ async function analyzeMultipart(formData) {
   } catch (cleanupError) {
     console.warn('Transient upload cleanup failed:', cleanupError);
   }
-  await saveServerState();
+  if (useKv) {
+    client.clientId = storeNormalizeClientId(clientId);
+    await saveClient(client);
+  } else {
+    await saveServerState();
+  }
   return {
     result,
     usageCount: client.usageCount,
@@ -785,8 +804,9 @@ async function analyzeMultipart(formData) {
 }
 
 async function getClientStatus(clientId) {
-  const serverState = await loadServerState();
-  const client = getClientRecord(serverState, clientId);
+  const client = isKvConfigured()
+    ? await ensureClientRecord(clientId)
+    : getClientRecord(await loadServerState(), clientId);
   return {
     clientId: normalizeClientId(clientId),
     usageCount: client.usageCount,
@@ -797,12 +817,20 @@ async function getClientStatus(clientId) {
 }
 
 async function unlockClientAccess(clientId, method = 'stars') {
-  const serverState = await loadServerState();
-  const client = getClientRecord(serverState, clientId);
+  const useKv = isKvConfigured();
+  const serverState = useKv ? null : await loadServerState();
+  const client = useKv
+    ? await ensureClientRecord(clientId)
+    : getClientRecord(serverState, clientId);
   client.accessUnlocked = true;
   client.lastPaymentMethod = method;
   client.lastSeenAt = new Date().toISOString();
-  await saveServerState();
+  if (useKv) {
+    client.clientId = storeNormalizeClientId(clientId);
+    await saveClient(client);
+  } else {
+    await saveServerState();
+  }
   return {
     clientId: normalizeClientId(clientId),
     accessUnlocked: true,
@@ -880,8 +908,9 @@ async function handleTelegramUpdate(update) {
 }
 
 async function getClientHistory(clientId) {
-  const serverState = await loadServerState();
-  const client = getClientRecord(serverState, clientId);
+  const client = isKvConfigured()
+    ? await ensureClientRecord(clientId)
+    : getClientRecord(await loadServerState(), clientId);
   return {
     clientId: normalizeClientId(clientId),
     history: Array.isArray(client.history) ? client.history.map(normalizeHistoryEntry) : []
@@ -919,6 +948,8 @@ const server = http.createServer(async (req, res) => {
         geminiConfigured: Boolean(GEMINI_API_KEY),
         botConfigured: Boolean(BOT_TOKEN),
         blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN),
+        kvConfigured: isKvConfigured(),
+        storeBackend: getStoreBackend(),
         botUsername: BOT_USERNAME || '',
         directUploadFallback: true
       });

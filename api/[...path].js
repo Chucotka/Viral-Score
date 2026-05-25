@@ -1,6 +1,14 @@
 import { Readable } from 'node:stream';
 import { del } from '@vercel/blob';
 import { handleUpload, generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
+import {
+  ensureClientRecord,
+  saveClient,
+  normalizeClientId,
+  isKvConfigured,
+  getStoreBackend
+} from '../lib/client-store.js';
+import { assertRateLimit } from '../lib/rate-limit.js';
 
 export const maxDuration = 300;
 
@@ -123,9 +131,6 @@ const ANALYSIS_SCHEMA = {
   ]
 };
 
-const memoryKey = '__viralScoreMemory';
-const memory = globalThis[memoryKey] || (globalThis[memoryKey] = { clients: new Map() });
-
 function sendJson(res, statusCode, payload) {
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -142,30 +147,6 @@ function sendText(res, statusCode, text, contentType = 'text/plain; charset=utf-
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.end(text);
-}
-
-function normalizeClientId(value) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  return text.replace(/\s+/g, '_').slice(0, 128);
-}
-
-function ensureClientRecord(clientId) {
-  const id = normalizeClientId(clientId);
-  if (!id) return null;
-  if (!memory.clients.has(id)) {
-    memory.clients.set(id, {
-      clientId: id,
-      usageCount: 0,
-      accessUnlocked: false,
-      lastSeenAt: null,
-      lastPaymentMethod: '',
-      lastAnalysis: null,
-      history: [],
-      analysisIds: new Set()
-    });
-  }
-  return memory.clients.get(id);
 }
 
 function clampScore(value) {
@@ -876,8 +857,9 @@ async function analyzeMultipart(formData) {
   const socialPlatform = String(formData.get('socialPlatform') || '').toLowerCase().trim(); // 'vk' | 'instagram' | 'tiktok'
   const socialToken = String(formData.get('socialToken') || '').trim(); // access_token or session cookie
 
-  const client = ensureClientRecord(clientId);
+  const client = await ensureClientRecord(clientId);
   if (!client) throw new Error('clientId is required.');
+  await assertRateLimit(clientId, 'analyze');
   client.lastSeenAt = new Date().toISOString();
 
   if (!client.accessUnlocked && freeLimit > 0 && client.usageCount >= freeLimit) {
@@ -887,6 +869,7 @@ async function analyzeMultipart(formData) {
   }
 
   if (analysisId && client.analysisIds.has(analysisId) && client.lastAnalysis?.result) {
+    await saveClient(client);
     return {
       result: client.lastAnalysis.result,
       usageCount: client.usageCount,
@@ -1043,6 +1026,7 @@ async function analyzeMultipart(formData) {
   client.lastAnalysis = savedAnalysis;
   client.analysisIds.add(savedAnalysis.id);
   client.history = [normalizeHistoryEntry(savedAnalysis), ...((client.history || []).map(normalizeHistoryEntry))].slice(0, 8);
+  await saveClient(client);
 
   try {
     await cleanupTransientUploadArtifacts({
@@ -1061,8 +1045,8 @@ async function analyzeMultipart(formData) {
   };
 }
 
-function getClientStatus(clientId) {
-  const client = ensureClientRecord(clientId);
+async function getClientStatus(clientId) {
+  const client = await ensureClientRecord(clientId);
   return {
     clientId: normalizeClientId(clientId),
     usageCount: client?.usageCount || 0,
@@ -1086,12 +1070,13 @@ function assertUnlockAuthorized(req, body = {}) {
   throw error;
 }
 
-function unlockClientAccess(clientId, method = 'stars') {
-  const client = ensureClientRecord(clientId);
+async function unlockClientAccess(clientId, method = 'stars') {
+  const client = await ensureClientRecord(clientId);
   if (!client) throw new Error('clientId is required.');
   client.accessUnlocked = true;
   client.lastPaymentMethod = method;
   client.lastSeenAt = new Date().toISOString();
+  await saveClient(client);
   return {
     clientId: normalizeClientId(clientId),
     accessUnlocked: true,
@@ -1164,7 +1149,7 @@ async function handleTelegramUpdate(update) {
   if (payment) {
     const clientId = extractClientIdFromPayload(payment.invoice_payload);
     if (!clientId) return { ok: false, error: 'Missing client payload in successful payment.' };
-    const unlocked = unlockClientAccess(clientId, 'stars');
+    const unlocked = await unlockClientAccess(clientId, 'stars');
     return { ok: true, handled: true, ...unlocked };
   }
 
@@ -1323,6 +1308,8 @@ export default async function handler(req, res) {
         geminiConfigured: Boolean(GEMINI_API_KEY),
         botConfigured: Boolean(BOT_TOKEN),
         blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN),
+        kvConfigured: isKvConfigured(),
+        storeBackend: getStoreBackend(),
         botUsername: BOT_USERNAME || ''
       });
     }
@@ -1675,11 +1662,11 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api/status') {
-      return sendJson(res, 200, getClientStatus(url.searchParams.get('clientId')));
+      return sendJson(res, 200, await getClientStatus(url.searchParams.get('clientId')));
     }
 
     if (req.method === 'GET' && path === '/api/history') {
-      const client = ensureClientRecord(url.searchParams.get('clientId'));
+      const client = await ensureClientRecord(url.searchParams.get('clientId'));
       return sendJson(res, 200, {
         clientId: normalizeClientId(url.searchParams.get('clientId')),
         history: Array.isArray(client?.history) ? client.history.map(normalizeHistoryEntry) : []
@@ -1704,7 +1691,7 @@ export default async function handler(req, res) {
       }
       const clientId = normalizeClientId(body?.clientId);
       if (!clientId) return sendJson(res, 400, { error: 'clientId is required.' });
-      return sendJson(res, 200, unlockClientAccess(clientId, body?.method));
+      return sendJson(res, 200, await unlockClientAccess(clientId, body?.method));
     }
 
     if (req.method === 'POST' && path === '/api/telegram-webhook') {
