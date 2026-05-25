@@ -2368,10 +2368,14 @@
         };
 
         let tg = null;
+        let starsInvoiceHandlersBound = false;
+        let starsCheckoutAwaitingUnlock = false;
+        let starsUnlockPollTimer = null;
         if (window.Telegram && window.Telegram.WebApp) {
             tg = window.Telegram.WebApp;
             tg.ready();
             tg.expand();
+            bindStarsInvoiceHandlers();
         }
 
         function makeClientId() {
@@ -2814,6 +2818,80 @@
 
         function isTelegramWebApp() {
             return Boolean(tg?.initData || tg?.platform || window.Telegram?.WebApp);
+        }
+
+        function isTelegramDesktopClient() {
+            const platform = String(tg?.platform || '').toLowerCase();
+            return ['tdesktop', 'macos', 'web', 'weba', 'unigram'].includes(platform);
+        }
+
+        function clearStarsUnlockPoll() {
+            if (!starsUnlockPollTimer) return;
+            clearInterval(starsUnlockPollTimer);
+            starsUnlockPollTimer = null;
+        }
+
+        function scheduleStarsUnlockPoll(maxMs = 90000) {
+            clearStarsUnlockPoll();
+            const started = Date.now();
+            starsUnlockPollTimer = setInterval(async () => {
+                if (!starsCheckoutAwaitingUnlock || state.accessUnlocked) {
+                    clearStarsUnlockPoll();
+                    starsCheckoutAwaitingUnlock = false;
+                    return;
+                }
+                await syncServerStatus();
+                if (state.accessUnlocked) {
+                    clearStarsUnlockPoll();
+                    starsCheckoutAwaitingUnlock = false;
+                    updateQuotaLabel();
+                    syncPaymentButtons();
+                    return;
+                }
+                if (Date.now() - started >= maxMs) {
+                    clearStarsUnlockPoll();
+                    starsCheckoutAwaitingUnlock = false;
+                }
+            }, 2000);
+        }
+
+        function handleStarsInvoiceClosed(event) {
+            const status = typeof event === 'string' ? event : event?.status;
+            if (status === 'paid' || status === 'pending') {
+                starsCheckoutAwaitingUnlock = false;
+                clearStarsUnlockPoll();
+                confirmUnlockAfterPayment('stars').catch(err => console.error(err));
+                return;
+            }
+            if (status === 'cancelled' || status === 'failed') {
+                starsCheckoutAwaitingUnlock = false;
+                clearStarsUnlockPoll();
+            }
+        }
+
+        function bindStarsInvoiceHandlers() {
+            if (!tg || starsInvoiceHandlersBound) return;
+            starsInvoiceHandlersBound = true;
+            if (typeof tg.onEvent === 'function') {
+                tg.onEvent('invoiceClosed', handleStarsInvoiceClosed);
+            }
+            const resumeStarsUnlockCheck = () => {
+                if (!starsCheckoutAwaitingUnlock || state.accessUnlocked) return;
+                syncServerStatus().then(() => {
+                    if (state.accessUnlocked) {
+                        starsCheckoutAwaitingUnlock = false;
+                        clearStarsUnlockPoll();
+                        updateQuotaLabel();
+                        syncPaymentButtons();
+                        return;
+                    }
+                    confirmUnlockAfterPayment('stars').catch(err => console.error(err));
+                }).catch(err => console.error(err));
+            };
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') resumeStarsUnlockCheck();
+            });
+            window.addEventListener('focus', resumeStarsUnlockCheck);
         }
 
         function ensureTelegramClientId() {
@@ -4897,15 +4975,39 @@
                 mainError.style.display = 'block';
                 return;
             }
+            bindStarsInvoiceHandlers();
+            starsCheckoutAwaitingUnlock = true;
+            const onStarsInvoiceStatus = status => {
+                if (status === 'paid' || status === 'pending') {
+                    starsCheckoutAwaitingUnlock = false;
+                    clearStarsUnlockPoll();
+                    confirmUnlockAfterPayment('stars').catch(err => console.error(err));
+                    return;
+                }
+                if (status === 'cancelled' || status === 'failed') {
+                    starsCheckoutAwaitingUnlock = false;
+                    clearStarsUnlockPoll();
+                }
+            };
+            const openStarsInvoiceFallback = () => {
+                if (tg?.openTelegramLink && /t\.me/i.test(state.starsInvoiceUrl)) {
+                    tg.openTelegramLink(state.starsInvoiceUrl);
+                } else {
+                    window.open(state.starsInvoiceUrl, '_blank');
+                }
+            };
             if (!tg || !tg.openInvoice) {
-                window.open(state.starsInvoiceUrl, '_blank');
+                openStarsInvoiceFallback();
+                if (isTelegramWebApp()) scheduleStarsUnlockPoll();
                 return;
             }
-            tg.openInvoice(state.starsInvoiceUrl, status => {
-                if (status === 'paid') {
-                    confirmUnlockAfterPayment('stars').catch(err => console.error(err));
-                }
-            });
+            try {
+                tg.openInvoice(state.starsInvoiceUrl, onStarsInvoiceStatus);
+            } catch (err) {
+                console.error('openInvoice failed:', err);
+                openStarsInvoiceFallback();
+            }
+            if (isTelegramDesktopClient()) scheduleStarsUnlockPoll();
         }
 
         function openTributeCheckout() {
