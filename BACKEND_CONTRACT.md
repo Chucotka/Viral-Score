@@ -17,8 +17,44 @@ Health check:
 ```txt
 GET /health
 ```
-Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false }`.
+Returns `{ "ok": true, "geminiConfigured": true|false, "botConfigured": true|false, "blobConfigured": true|false }`.
 On Vercel, `/health` rewrites to the API route that serves this response.
+
+Vercel Blob client token:
+
+```txt
+POST /api/blob/upload
+```
+Issues a Vercel Blob client token for direct browser→Blob uploads (multipart client upload protocol).
+
+Vercel Blob delete:
+
+```txt
+POST /api/blob/delete   { url: "https://..." }
+DELETE /api/blob/delete?url=...
+```
+Deletes a blob by URL. Returns `{ ok: true }` or `{ ok: true, skipped: true }` if BLOB_READ_WRITE_TOKEN is not configured.
+
+Gemini resumable upload session:
+
+```txt
+POST /api/upload-session
+```
+Creates a Gemini Files API resumable upload session. Returns `{ uploadUrl, sessionId }`.
+
+Gemini upload chunk:
+
+```txt
+POST /api/upload-chunk
+```
+Proxies a single chunk to the Gemini Files API resumable upload URL.
+
+Gemini file status:
+
+```txt
+GET /api/file-status?name=files/...
+```
+Polls the Gemini Files API for file processing state. Returns `{ name, state, uri, mimeType }`.
 
 Client status:
 
