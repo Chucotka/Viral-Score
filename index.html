@@ -2935,11 +2935,29 @@
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
         }
 
+        async function cleanupTransientBlobUrl(blobUrl) {
+            const url = String(blobUrl || '').trim();
+            if (!url) return false;
+            const cleanupUrl = getBackendEndpointUrl('/api/blob/delete');
+            if (!cleanupUrl) return false;
+            try {
+                const response = await fetch(cleanupUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                return response.ok;
+            } catch (error) {
+                console.warn('Blob cleanup failed:', error);
+                return false;
+            }
+        }
+
         function startBackgroundGeminiTransfer(blobUrl, mimeType, fileName) {
             if (!blobUrl || state.uploadedVideoFileUri || isTelegramWebApp() || state.geminiTransferPromise) return;
             syncVideoAnalyzeButton();
             state.geminiTransferPromise = ensureGeminiFileFromBlob(blobUrl, mimeType, fileName)
-                .then((result) => {
+                .then(async (result) => {
                     if (state.uploadedVideoBlobUrl === blobUrl) {
                         state.uploadedVideoFileUri = result.fileUri;
                         state.uploadedVideoMimeType = result.mimeType;
@@ -2947,6 +2965,10 @@
                             videoFileMeta.textContent = (state.lang === 'ru' ? '✅ Готово к анализу — ' : '✅ Ready — ')
                                 + state.selectedVideoFile.name + ' · ' + formatBytes(state.selectedVideoFile.size);
                         }
+                    }
+                    const cleaned = await cleanupTransientBlobUrl(blobUrl);
+                    if (cleaned && state.uploadedVideoBlobUrl === blobUrl) {
+                        state.uploadedVideoBlobUrl = '';
                     }
                     return result;
                 })
@@ -5196,6 +5218,9 @@
             formData.append('freeLimit', String(state.freeLimit));
             formData.append('accessUnlocked', state.accessUnlocked ? '1' : '0');
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
+                if (state.uploadedVideoBlobUrl) {
+                    formData.append('videoBlobUrl', state.uploadedVideoBlobUrl);
+                }
                 if (shouldUseDirectBackendUpload()) {
                     formData.append('video', state.selectedVideoFile, state.selectedVideoFile.name);
                 } else {

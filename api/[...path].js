@@ -1,4 +1,5 @@
 import { Readable } from 'node:stream';
+import { del } from '@vercel/blob';
 import { handleUpload, generateClientTokenFromReadWriteToken } from '@vercel/blob/client';
 
 export const maxDuration = 300;
@@ -409,6 +410,50 @@ async function getApiError(response, fallback) {
   }
 }
 
+async function deleteGeminiFile(fileUri) {
+  const resource = geminiFileResourcePath(fileUri);
+  if (!resource) return { ok: false, skipped: true };
+  if (!GEMINI_API_KEY) return { ok: false, skipped: true };
+  const deleteRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${resource}?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+    method: 'DELETE',
+    headers: { 'x-goog-api-key': GEMINI_API_KEY }
+  });
+  if (!deleteRes.ok && deleteRes.status !== 404) {
+    throw new Error(await getApiError(deleteRes, `Gemini delete failed: ${deleteRes.status}`));
+  }
+  return { ok: true, resource };
+}
+
+async function cleanupTransientUploadArtifacts({ fileUri = '', videoBlobUrl = '' } = {}) {
+  const results = { gemini: null, blob: null };
+  const tasks = [];
+  if (fileUri) {
+    tasks.push((async () => {
+      try {
+        results.gemini = await deleteGeminiFile(fileUri);
+      } catch (error) {
+        results.gemini = { ok: false, error: error?.message || 'Gemini delete failed.' };
+      }
+    })());
+  }
+  if (videoBlobUrl) {
+    if (!BLOB_READ_WRITE_TOKEN) {
+      results.blob = { ok: false, skipped: true };
+    } else {
+      tasks.push((async () => {
+        try {
+          await del(videoBlobUrl);
+          results.blob = { ok: true };
+        } catch (error) {
+          results.blob = { ok: false, error: error?.message || 'Blob delete failed.' };
+        }
+      })());
+    }
+  }
+  await Promise.all(tasks);
+  return results;
+}
+
 async function uploadVideoFile(file) {
   const body = file?.body || file;
   const fileName = file?.name || 'video.mp4';
@@ -785,6 +830,8 @@ async function analyzeMultipart(formData) {
   }
 
   let requestBody;
+  let cleanupFileUri = '';
+  let cleanupBlobUrl = '';
   if (sourceType === 'video-file') {
     const fileUri = String(formData.get('fileUri') || '').trim();
     const fileMimeType = String(formData.get('fileMimeType') || 'video/mp4').trim();
@@ -792,11 +839,14 @@ async function analyzeMultipart(formData) {
     let uploadedFile = null;
     if (fileUri) {
       uploadedFile = { uri: fileUri, mimeType: fileMimeType };
+      cleanupFileUri = fileUri;
+      cleanupBlobUrl = videoBlobUrl;
     } else if (videoBlobUrl) {
       throw new Error('Video is still transferring to AI. Wait a moment and tap Analyze again.');
     } else if (video && typeof video !== 'string') {
       // Last resort: file in formdata (limited to 4.5MB)
       uploadedFile = await uploadVideoFile(video);
+      cleanupFileUri = uploadedFile?.uri || '';
     }
     if (!uploadedFile) throw new Error('Missing uploaded video file.');
     if (!uploadedFile.uri) throw new Error('Missing file URI. Upload may have failed.');
@@ -815,6 +865,7 @@ async function analyzeMultipart(formData) {
       try {
         const uploadedFile = await uploadVideoFromBlobUrl(normalizedUrl, { waitForActive: false, maxWaitMs: 45000 });
         if (!uploadedFile?.uri) throw new Error('Missing uploaded file URI from direct video URL.');
+        cleanupFileUri = uploadedFile.uri || '';
         requestBody = {
           contents: [{
             parts: [
@@ -899,6 +950,15 @@ async function analyzeMultipart(formData) {
   client.lastAnalysis = savedAnalysis;
   client.analysisIds.add(savedAnalysis.id);
   client.history = [normalizeHistoryEntry(savedAnalysis), ...((client.history || []).map(normalizeHistoryEntry))].slice(0, 8);
+
+  try {
+    await cleanupTransientUploadArtifacts({
+      fileUri: cleanupFileUri,
+      videoBlobUrl: cleanupBlobUrl || String(formData.get('videoBlobUrl') || '').trim()
+    });
+  } catch (cleanupError) {
+    console.warn('Transient upload cleanup failed:', cleanupError);
+  }
 
   return {
     result,
@@ -1142,7 +1202,7 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') {
       res.statusCode = 204;
       res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
       res.setHeader(
         'Access-Control-Allow-Headers',
         'Content-Type, X-Mime-Type, x-mime-type, X-File-Size, X-File-Name, X-Upload-Url, X-Upload-Session-Id, x-upload-session-id, X-Chunk-Offset, x-chunk-offset, X-Goog-Upload-Command, x-goog-upload-command'
@@ -1170,6 +1230,23 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && path === '/api/blob/client-token') {
       return sendJson(res, 200, await createBlobClientToken(req, url));
+    }
+
+    if ((req.method === 'POST' || req.method === 'DELETE') && path === '/api/blob/delete') {
+      if (!BLOB_READ_WRITE_TOKEN) {
+        return sendJson(res, 200, { ok: true, skipped: true });
+      }
+      const body = req.method === 'DELETE'
+        ? Object.fromEntries(url.searchParams.entries())
+        : await readJson(req, url).catch(() => ({}));
+      const urlToDelete = String(body?.url || body?.blobUrl || body?.pathname || '').trim();
+      if (!urlToDelete) return sendJson(res, 400, { error: 'url required' });
+      try {
+        await del(urlToDelete);
+        return sendJson(res, 200, { ok: true });
+      } catch (error) {
+        return sendJson(res, 500, { error: error?.message || 'Blob delete failed.' });
+      }
     }
 
     // Start a Gemini resumable upload session so the browser can upload
