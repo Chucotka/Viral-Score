@@ -1956,8 +1956,10 @@
                 launchHostingMissing: 'Deploy to HTTPS or open as a Telegram Mini App. Local file pages block video uploads.',
                 launchBotReady: 'Bot username saved',
                 launchBotMissing: 'Add the bot username so sharing points users back to the app.',
-                launchPaymentsReady: 'Payment link configured',
+                launchPaymentsReady: 'Payment links configured',
                 launchPaymentsMissing: 'Add Stars invoice URL, card checkout URL, Tribute link, or one of them for the selected billing mode.',
+                launchPaymentsOptional: 'Free tier works. For paid unlock: open Settings → Generate Stars invoice link (or add card/Tribute URL).',
+                launchPaymentsAuto: 'Generating Stars invoice link…',
                 launchStarsReady: 'Stars invoice generator ready',
                 launchStarsMissing: 'Add BOT_TOKEN on the server to generate Stars invoice links.',
                 starsInvoiceTitle: 'Viral Score access',
@@ -2165,8 +2167,10 @@
                 launchHostingMissing: 'Задеплой на HTTPS или открой как Telegram Mini App. Локальный file:// блокирует загрузку видео.',
                 launchBotReady: 'Имя бота сохранено',
                 launchBotMissing: 'Добавь имя бота, чтобы шаринг возвращал пользователей в приложение.',
-                launchPaymentsReady: 'Платёжная ссылка настроена',
+                launchPaymentsReady: 'Ссылки для оплаты настроены',
                 launchPaymentsMissing: 'Добавь Stars invoice URL, URL оплаты картой, Tribute link или один из вариантов для выбранного режима.',
+                launchPaymentsOptional: 'Бесплатный лимит работает. Для оплаты: Настройки → «Сгенерировать ссылку Stars» (или URL карты / Tribute).',
+                launchPaymentsAuto: 'Создаём ссылку Stars…',
                 launchStarsReady: 'Генератор Stars invoice готов',
                 launchStarsMissing: 'Добавь BOT_TOKEN на сервере, чтобы генерировать ссылки Stars.',
                 starsInvoiceTitle: 'Доступ к Viral Score',
@@ -4444,6 +4448,28 @@
             return Boolean(state.starsInvoiceUrl);
         }
 
+        function needsStarsInvoiceUrl() {
+            return state.billingMode === 'stars' || state.billingMode === 'both';
+        }
+
+        /** Launch checklist: free tier does not require payment URLs. */
+        function isLaunchMonetizationReady() {
+            if (isPaymentConfigured()) return true;
+            if (state.freeLimit > 0) return true;
+            return false;
+        }
+
+        function getLaunchMonetizationNote(ready) {
+            if (ready) return state.lang === 'ru' ? 'Готово.' : 'Ready.';
+            if (state.freeLimit > 0) return t('launchPaymentsOptional');
+            if (needsStarsInvoiceUrl() && state.backendHealth?.botConfigured) {
+                return state.lang === 'ru'
+                    ? 'Открой Настройки (⚙️) → «Сгенерировать ссылку Stars».'
+                    : 'Open Settings (⚙️) → “Generate Stars invoice link”.';
+            }
+            return state.lang === 'ru' ? 'Нужно перед запуском.' : 'Needed before launch.';
+        }
+
         function canAnalyze() {
             return Boolean(state.backendUrl);
         }
@@ -4490,7 +4516,11 @@
                 { ready: backendReady, readyText: backendReadyText, missingText: state.backendUrl ? backendNote : t('launchApiMissing') },
                 { ready: safeProtocol, readyText: t('launchHostingReady'), missingText: t('launchHostingMissing') },
                 { ready: Boolean(state.botUsername), readyText: t('launchBotReady'), missingText: t('launchBotMissing') },
-                { ready: isPaymentConfigured(), readyText: t('launchPaymentsReady'), missingText: t('launchPaymentsMissing') },
+                {
+                    ready: isLaunchMonetizationReady(),
+                    readyText: isPaymentConfigured() ? t('launchPaymentsReady') : t('launchPaymentsOptional'),
+                    missingText: t('launchPaymentsMissing')
+                },
                 {
                     ready: state.billingMode === 'tribute' || Boolean(state.backendHealth?.botConfigured),
                     readyText: t('launchStarsReady'),
@@ -4509,7 +4539,11 @@
                 title.textContent = item.ready ? item.readyText : item.missingText;
                 const note = document.createElement('div');
                 note.className = 'launch-item-note';
-                note.textContent = item.ready ? (state.lang === 'ru' ? 'Готово.' : 'Ready.') : (state.lang === 'ru' ? 'Нужно перед запуском.' : 'Needed before launch.');
+                note.textContent = item.ready
+                    ? (isPaymentConfigured()
+                        ? (state.lang === 'ru' ? 'Готово.' : 'Ready.')
+                        : t('launchPaymentsOptional'))
+                    : getLaunchMonetizationNote(false);
                 body.append(title, note);
                 row.append(dot, body);
                 launchChecklist.appendChild(row);
@@ -4539,17 +4573,24 @@
             }
         }
 
-        async function generateStarsInvoiceLink() {
-            const price = Math.max(1, Math.min(25000, Math.round(Number(document.getElementById('stars-price-input').value || state.starsPrice))));
+        async function generateStarsInvoiceLink(options = {}) {
+            const silent = options.silent === true;
+            const price = Math.max(1, Math.min(25000, Math.round(Number(document.getElementById('stars-price-input')?.value || state.starsPrice))));
             if (!Number.isFinite(price) || price < 1) {
-                setSettingsStatus(t('starsPriceInvalid'), 'warn');
-                return;
+                if (!silent) setSettingsStatus(t('starsPriceInvalid'), 'warn');
+                return false;
             }
             if (!state.backendUrl) {
-                setSettingsStatus(t('backendRequired'), 'warn');
-                return;
+                if (!silent) setSettingsStatus(t('backendRequired'), 'warn');
+                return false;
             }
-            setSettingsStatus(state.lang === 'ru' ? 'Генерируем ссылку Stars...' : 'Generating Stars invoice link...', 'info');
+            if (!state.backendHealth?.botConfigured) {
+                if (!silent) setSettingsStatus(t('launchStarsMissing'), 'warn');
+                return false;
+            }
+            if (!silent) {
+                setSettingsStatus(state.lang === 'ru' ? 'Генерируем ссылку Stars...' : 'Generating Stars invoice link...', 'info');
+            }
             try {
                 const endpointUrl = getBackendEndpointUrl('/api/stars-invoice-link');
                 const response = await fetch(endpointUrl, {
@@ -4574,10 +4615,26 @@
                 document.getElementById('stars-invoice-input').value = state.starsInvoiceUrl;
                 document.getElementById('stars-price-input').value = String(price);
                 saveMonetizationConfig();
-                setSettingsStatus(t('starsInvoiceGenerated'), 'ok');
+                syncPaymentButtons();
+                renderLaunchChecklist();
+                if (!silent) setSettingsStatus(t('starsInvoiceGenerated'), 'ok');
+                return true;
             } catch (error) {
-                setSettingsStatus(error?.message || t('starsInvoiceFailed'), 'warn');
+                if (!silent) setSettingsStatus(error?.message || t('starsInvoiceFailed'), 'warn');
+                return false;
             }
+        }
+
+        async function maybeAutoConfigureMonetization() {
+            const fromServer = normalizeBotUsername(state.backendHealth?.botUsername || '');
+            if (fromServer && (!state.botUsername || !safeStorage.getItem(STORAGE_KEYS.botUsername))) {
+                state.botUsername = fromServer;
+                safeStorage.setItem(STORAGE_KEYS.botUsername, fromServer);
+                if (botUsernameInput) botUsernameInput.value = fromServer;
+            }
+            if (!needsStarsInvoiceUrl() || state.starsInvoiceUrl) return;
+            if (!state.backendHealth?.botConfigured || state.backendStatus !== 'ok') return;
+            await generateStarsInvoiceLink({ silent: true });
         }
 
         function getBotLink() {
@@ -4714,8 +4771,12 @@
                 state.backendStatus = response.ok ? 'ok' : 'fail';
                 state.backendHealth = response.ok ? data : {};
                 // Auto-populate botUsername from server if not overridden by user
-                if (response.ok && data.botUsername && !safeStorage.getItem(STORAGE_KEYS.botUsername)) {
-                    state.botUsername = normalizeBotUsername(data.botUsername);
+                if (response.ok && data.botUsername) {
+                    const fromServer = normalizeBotUsername(data.botUsername);
+                    if (!safeStorage.getItem(STORAGE_KEYS.botUsername) || !state.botUsername) {
+                        state.botUsername = fromServer;
+                        safeStorage.setItem(STORAGE_KEYS.botUsername, fromServer);
+                    }
                     if (botUsernameInput) botUsernameInput.value = state.botUsername;
                 }
             } catch {
@@ -4725,7 +4786,9 @@
                 if (timeout) clearTimeout(timeout);
             }
             renderBackendStatusPill();
+            await maybeAutoConfigureMonetization();
             renderLaunchChecklist();
+            syncPaymentButtons();
         }
 
         async function syncServerStatus() {
@@ -6001,7 +6064,10 @@
         if (!canAnalyze()) {
             openSettings();
         } else {
-            refreshBackendHealth().then(() => Promise.all([syncServerStatus(), syncServerHistory()]));
+            refreshBackendHealth().then(async () => {
+                await maybeAutoConfigureMonetization();
+                await Promise.all([syncServerStatus(), syncServerHistory()]);
+            });
         }
     </script>
 </body>
