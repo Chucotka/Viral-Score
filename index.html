@@ -1697,6 +1697,50 @@
 
             <button class="primary-btn" id="save-monetization-btn" data-i18n="saveMonetization">Save monetization</button>
 
+            <div class="section-title" style="margin-top: 20px;" data-i18n="socialAuthTitle">Social networks</div>
+            <div class="modal-desc" data-i18n="socialAuthDesc">Connect accounts so Viral Score can analyze private or restricted videos by link.</div>
+
+            <!-- VK OAuth -->
+            <div class="input-group" id="vk-auth-group">
+                <label data-i18n="socialVkConnect">Connect VK</label>
+                <div class="action-buttons" style="margin-top:6px; gap:8px;">
+                    <button type="button" class="secondary-btn" id="vk-connect-btn" data-i18n="socialVkConnect">Connect VK</button>
+                    <button type="button" class="secondary-btn" id="vk-disconnect-btn" style="display:none;" data-i18n="socialVkDisconnect">Disconnect</button>
+                </div>
+                <div id="vk-auth-status" style="font-size:12px;margin-top:4px;color:var(--text-secondary);"></div>
+            </div>
+
+            <!-- Instagram cookie -->
+            <div class="input-group">
+                <label for="instagram-cookie-input" data-i18n="socialInstagramLabel">Instagram session cookie</label>
+                <input type="password" id="instagram-cookie-input" autocomplete="off" placeholder="sessionid=..." data-i18n-placeholder="socialInstagramPlaceholder">
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;" data-i18n="socialInstagramHelp">Open instagram.com → DevTools → Cookies → copy sessionid.</div>
+                <div class="action-buttons" style="margin-top:6px; gap:8px;">
+                    <button type="button" class="secondary-btn" id="instagram-save-btn" data-i18n="socialSave">Save</button>
+                    <button type="button" class="secondary-btn" id="instagram-clear-btn" data-i18n="socialClear">Clear</button>
+                </div>
+            </div>
+
+            <!-- TikTok cookie -->
+            <div class="input-group">
+                <label for="tiktok-cookie-input" data-i18n="socialTiktokLabel">TikTok session cookie</label>
+                <input type="password" id="tiktok-cookie-input" autocomplete="off" placeholder="sessionid=..." data-i18n-placeholder="socialTiktokPlaceholder">
+                <div style="font-size:11px;color:var(--text-secondary);margin-top:3px;" data-i18n="socialTiktokHelp">Open tiktok.com → DevTools → Cookies → copy sessionid.</div>
+                <div class="action-buttons" style="margin-top:6px; gap:8px;">
+                    <button type="button" class="secondary-btn" id="tiktok-save-btn" data-i18n="socialSave">Save</button>
+                    <button type="button" class="secondary-btn" id="tiktok-clear-btn" data-i18n="socialClear">Clear</button>
+                </div>
+            </div>
+
+            <!-- Bot link type toggle -->
+            <div class="input-group" style="margin-top: 12px;">
+                <label data-i18n="botLinkTypeLabel">Share link format</label>
+                <div class="action-buttons" style="margin-top:6px; gap:8px;">
+                    <button type="button" class="secondary-btn" id="bot-link-type-miniapp-btn" data-i18n="botLinkTypeMiniApp">Mini App</button>
+                    <button type="button" class="secondary-btn" id="bot-link-type-bot-btn" data-i18n="botLinkTypeBot">Bot start</button>
+                </div>
+            </div>
+
             <div class="section-title" style="margin-top: 20px;" data-i18n="launchTitle">Launch readiness</div>
             <div class="modal-desc" data-i18n="launchDesc">Checklist for moving from local MVP to a Telegram Mini App.</div>
             <div class="launch-checklist" id="launch-checklist"></div>
@@ -1810,7 +1854,9 @@
             botUsername: 'viral_score_bot_username_v1',
             clientId: 'viral_score_client_id_v1',
             usageCount: 'viral_score_usage_count_v1',
-            accessUnlocked: 'viral_score_access_unlocked_v1'
+            accessUnlocked: 'viral_score_access_unlocked_v1',
+            socialTokens: 'viral_score_social_tokens_v1',
+            botLinkType: 'viral_score_bot_link_type_v1'
         };
 
         const I18N = {
@@ -1999,7 +2045,25 @@
                 quotaLabel: count => `Free analyses used: ${count}`,
                 quotaLabelLimit: (count, limit) => `${count}/${limit} free analyses used`,
                 urlContextWarning: host => `⚠️ ${host} requires login — analysis based on your notes and URL metadata only.`,
-                shareText: score => `⚡ My post scored ${score}/100 on Viral Score!\n\n🔥 Try it yourself →`
+                urlContextAuthActive: host => `🔐 ${host} — using your connected account for analysis.`,
+                shareText: score => `⚡ My post scored ${score}/100 on Viral Score!\n\n🔥 Try it yourself →`,
+                socialAuthTitle: 'Social networks',
+                socialAuthDesc: 'Connect accounts so Viral Score can analyze private or restricted videos by link.',
+                socialVkConnect: 'Connect VK',
+                socialVkConnected: '✓ VK connected',
+                socialVkDisconnect: 'Disconnect',
+                socialInstagramLabel: 'Instagram session cookie',
+                socialInstagramPlaceholder: 'sessionid=...',
+                socialInstagramHelp: 'Open instagram.com in browser → DevTools → Application → Cookies → copy sessionid value.',
+                socialTiktokLabel: 'TikTok session cookie',
+                socialTiktokPlaceholder: 'sessionid=...',
+                socialTiktokHelp: 'Open tiktok.com in browser → DevTools → Application → Cookies → copy sessionid value.',
+                socialSave: 'Save',
+                socialSaved: 'Saved',
+                socialClear: 'Clear',
+                botLinkTypeLabel: 'Share link format',
+                botLinkTypeMiniApp: 'Mini App (opens app directly)',
+                botLinkTypeBot: 'Bot start link'
             },
             ru: {
                 sourceUpload: 'Загрузить видео',
@@ -2186,7 +2250,25 @@
                 quotaLabel: count => `Использовано бесплатных анализов: ${count}`,
                 quotaLabelLimit: (count, limit) => `Использовано ${count}/${limit} бесплатных анализов`,
                 urlContextWarning: host => `⚠️ ${host} требует авторизации — анализ по твоим заметкам и метаданным URL.`,
-                shareText: score => `⚡ Мой пост набрал ${score}/100 в Viral Score!\n\n🔥 Попробуй сам →`
+                urlContextAuthActive: host => `🔐 ${host} — используется ваш аккаунт для анализа.`,
+                shareText: score => `⚡ Мой пост набрал ${score}/100 в Viral Score!\n\n🔥 Попробуй сам →`,
+                socialAuthTitle: 'Соцсети',
+                socialAuthDesc: 'Подключи аккаунты, чтобы Viral Score мог анализировать приватные или закрытые видео по ссылке.',
+                socialVkConnect: 'Войти через VK',
+                socialVkConnected: '✓ VK подключён',
+                socialVkDisconnect: 'Отключить',
+                socialInstagramLabel: 'Instagram session cookie',
+                socialInstagramPlaceholder: 'sessionid=...',
+                socialInstagramHelp: 'Открой instagram.com в браузере → DevTools → Application → Cookies → скопируй значение sessionid.',
+                socialTiktokLabel: 'TikTok session cookie',
+                socialTiktokPlaceholder: 'sessionid=...',
+                socialTiktokHelp: 'Открой tiktok.com в браузере → DevTools → Application → Cookies → скопируй значение sessionid.',
+                socialSave: 'Сохранить',
+                socialSaved: 'Сохранено',
+                socialClear: 'Очистить',
+                botLinkTypeLabel: 'Формат ссылки для шаринга',
+                botLinkTypeMiniApp: 'Mini App (открывает приложение)',
+                botLinkTypeBot: 'Bot start ссылка'
             }
         };
 
@@ -2338,6 +2420,12 @@
             lastAnalysisResult: null,
             lastAnalysisMeta: null,
             analysisTranslations: {},
+            socialTokens: (() => {
+                try {
+                    return JSON.parse(safeStorage.getItem(STORAGE_KEYS.socialTokens) || '{}');
+                } catch { return {}; }
+            })(),
+            botLinkType: safeStorage.getItem(STORAGE_KEYS.botLinkType) || 'miniapp',
             history: loadHistory()
         };
         safeStorage.setItem(STORAGE_KEYS.clientId, state.clientId);
@@ -2690,8 +2778,13 @@
             try {
                 const host = new URL(value).hostname.replace(/^www\./, '');
                 const isClosed = CLOSED_PLATFORMS.some(p => host.includes(p));
-                if (isClosed) return t('urlContextWarning', host);
-                return null;
+                if (!isClosed) return null;
+                // Check if user has an active social auth token for this platform
+                const platform = getSocialPlatformForUrl(value);
+                if (platform && state.socialTokens[platform]) {
+                    return t('urlContextAuthActive', host);
+                }
+                return t('urlContextWarning', host);
             } catch {
                 return null;
             }
@@ -4030,6 +4123,11 @@
 
         function openSettings() {
             backendUrlInput.value = state.backendUrl;
+            // Restore social cookie fields
+            const instCookie = document.getElementById('instagram-cookie-input');
+            const tiktokCookie = document.getElementById('tiktok-cookie-input');
+            if (instCookie) instCookie.value = state.socialTokens.instagram || '';
+            if (tiktokCookie) tiktokCookie.value = state.socialTokens.tiktok || '';
             document.getElementById('stars-invoice-input').value = state.starsInvoiceUrl;
             document.getElementById('stars-price-input').value = String(state.starsPrice);
             document.getElementById('tribute-url-input').value = state.tributeUrl;
@@ -4585,6 +4683,11 @@
                 const data = response.ok ? await response.json().catch(() => ({})) : {};
                 state.backendStatus = response.ok ? 'ok' : 'fail';
                 state.backendHealth = response.ok ? data : {};
+                // Auto-populate botUsername from server if not overridden by user
+                if (response.ok && data.botUsername && !safeStorage.getItem(STORAGE_KEYS.botUsername)) {
+                    state.botUsername = normalizeBotUsername(data.botUsername);
+                    if (botUsernameInput) botUsernameInput.value = state.botUsername;
+                }
             } catch {
                 state.backendStatus = 'fail';
                 state.backendHealth = {};
@@ -4654,6 +4757,16 @@
                 backendStatusPill.classList.add('warn');
                 if (textNode) textNode.textContent = t('backendOffline');
             }
+        }
+
+        function getSocialPlatformForUrl(url) {
+            try {
+                const host = new URL(url).hostname.replace(/^www\./, '');
+                if (host.includes('instagram.com')) return 'instagram';
+                if (host.includes('tiktok.com')) return 'tiktok';
+                if (host.includes('vk.com') || host.includes('vkvideo.ru')) return 'vk';
+            } catch { /* ignore */ }
+            return '';
         }
 
         function getBotShareLink() {
@@ -5250,6 +5363,12 @@
             if (state.currentSourceType === 'video-url') {
                 const urlValue = normalizePasteableLink(postUrlInput.value.trim()) || postUrlInput.value.trim();
                 formData.append('url', urlValue);
+                // Attach social auth token if user has one configured for this platform
+                const urlPlatformKey = getSocialPlatformForUrl(urlValue);
+                if (urlPlatformKey && state.socialTokens[urlPlatformKey]) {
+                    formData.append('socialPlatform', urlPlatformKey);
+                    formData.append('socialToken', state.socialTokens[urlPlatformKey]);
+                }
             }
             if (state.currentSourceType === 'text') {
                 const raw = postInput.value.trim();
@@ -5680,7 +5799,19 @@
                 const botUsername = getBotShareLink();
                 const score = state.lastAnalysisResult.viral_score;
                 const fallbackUrl = /^https?:\/\//i.test(window.location.href) ? window.location.href : '';
-                const shareLink = botUsername ? `t.me/${botUsername}` : fallbackUrl;
+                // Build proper deep-link: Mini App startapp= or bot ?start= parameter
+                let shareLink = '';
+                if (botUsername) {
+                    const scoreParam = `viral${score}`;
+                    if (state.botLinkType === 'bot') {
+                        shareLink = `https://t.me/${botUsername}?start=${scoreParam}`;
+                    } else {
+                        // Mini App: t.me/BOT/app?startapp=... (works if bot has Mini App attached)
+                        shareLink = `https://t.me/${botUsername}/app?startapp=${scoreParam}`;
+                    }
+                } else {
+                    shareLink = fallbackUrl;
+                }
                 const text = `${t('shareText', score)}${shareLink ? `\n\n${shareLink}` : ''}`;
                 const shareUrl = `https://t.me/share/url?${shareLink ? `url=${encodeURIComponent(shareLink)}&` : ''}text=${encodeURIComponent(text)}`;
                 if (tg && tg.openTelegramLink) tg.openTelegramLink(shareUrl);
@@ -5688,6 +5819,121 @@
             });
 
             wireCopyButtons();
+
+            // ── Social auth wiring ───────────────────────────────────────
+            (function wireSocialAuth() {
+                const vkConnectBtn = document.getElementById('vk-connect-btn');
+                const vkDisconnectBtn = document.getElementById('vk-disconnect-btn');
+                const vkStatus = document.getElementById('vk-auth-status');
+                const instagramInput = document.getElementById('instagram-cookie-input');
+                const instagramSaveBtn = document.getElementById('instagram-save-btn');
+                const instagramClearBtn = document.getElementById('instagram-clear-btn');
+                const tiktokInput = document.getElementById('tiktok-cookie-input');
+                const tiktokSaveBtn = document.getElementById('tiktok-save-btn');
+                const tiktokClearBtn = document.getElementById('tiktok-clear-btn');
+                const botMiniAppBtn = document.getElementById('bot-link-type-miniapp-btn');
+                const botStartBtn = document.getElementById('bot-link-type-bot-btn');
+
+                function updateVkUI() {
+                    const hasToken = Boolean(state.socialTokens.vk);
+                    if (vkConnectBtn) vkConnectBtn.style.display = hasToken ? 'none' : '';
+                    if (vkDisconnectBtn) vkDisconnectBtn.style.display = hasToken ? '' : 'none';
+                    if (vkStatus) vkStatus.textContent = hasToken ? t('socialVkConnected') : '';
+                }
+
+                function updateBotLinkTypeUI() {
+                    const isMiniApp = state.botLinkType !== 'bot';
+                    if (botMiniAppBtn) botMiniAppBtn.style.fontWeight = isMiniApp ? 'bold' : '';
+                    if (botStartBtn) botStartBtn.style.fontWeight = !isMiniApp ? 'bold' : '';
+                    if (botMiniAppBtn) botMiniAppBtn.style.opacity = isMiniApp ? '1' : '0.55';
+                    if (botStartBtn) botStartBtn.style.opacity = !isMiniApp ? '1' : '0.55';
+                }
+
+                function saveSocialTokens() {
+                    safeStorage.setItem(STORAGE_KEYS.socialTokens, JSON.stringify(state.socialTokens));
+                }
+
+                // Restore cookie inputs on open
+                if (instagramInput) instagramInput.value = state.socialTokens.instagram || '';
+                if (tiktokInput) tiktokInput.value = state.socialTokens.tiktok || '';
+                updateVkUI();
+                updateBotLinkTypeUI();
+
+                // VK OAuth — open popup window, listen for postMessage callback
+                if (vkConnectBtn) vkConnectBtn.addEventListener('click', async () => {
+                    const authUrlEndpoint = getBackendEndpointUrl('/api/social-auth/vk-url');
+                    if (!authUrlEndpoint) { setSettingsStatus(t('backendRequired'), 'warn'); return; }
+                    try {
+                        const res = await fetch(authUrlEndpoint);
+                        const data = await res.json();
+                        if (!res.ok || !data.authUrl) throw new Error(data.error || 'VK auth URL unavailable');
+                        const popup = window.open(data.authUrl, 'vk_oauth', 'width=600,height=500,menubar=no,toolbar=no');
+                        const handler = (event) => {
+                            if (!event.data || event.data.type !== 'social_auth_callback' || event.data.platform !== 'vk') return;
+                            window.removeEventListener('message', handler);
+                            if (event.data.ok && event.data.access_token) {
+                                state.socialTokens.vk = event.data.access_token;
+                                saveSocialTokens();
+                                updateVkUI();
+                                setSettingsStatus(t('socialVkConnected'), 'ok');
+                            } else {
+                                setSettingsStatus('VK auth failed', 'warn');
+                            }
+                            if (popup && !popup.closed) popup.close();
+                        };
+                        window.addEventListener('message', handler);
+                    } catch (err) {
+                        setSettingsStatus(err.message || 'VK auth error', 'warn');
+                    }
+                });
+
+                if (vkDisconnectBtn) vkDisconnectBtn.addEventListener('click', () => {
+                    state.socialTokens.vk = '';
+                    saveSocialTokens();
+                    updateVkUI();
+                    setSettingsStatus('VK disconnected', 'ok');
+                });
+
+                // Instagram cookie save/clear
+                if (instagramSaveBtn) instagramSaveBtn.addEventListener('click', () => {
+                    const val = (instagramInput?.value || '').replace(/^sessionid=/, '').trim();
+                    state.socialTokens.instagram = val;
+                    saveSocialTokens();
+                    setSettingsStatus(t('socialSaved'), 'ok');
+                });
+                if (instagramClearBtn) instagramClearBtn.addEventListener('click', () => {
+                    state.socialTokens.instagram = '';
+                    if (instagramInput) instagramInput.value = '';
+                    saveSocialTokens();
+                    setSettingsStatus(t('socialClear'), 'ok');
+                });
+
+                // TikTok cookie save/clear
+                if (tiktokSaveBtn) tiktokSaveBtn.addEventListener('click', () => {
+                    const val = (tiktokInput?.value || '').replace(/^sessionid=/, '').trim();
+                    state.socialTokens.tiktok = val;
+                    saveSocialTokens();
+                    setSettingsStatus(t('socialSaved'), 'ok');
+                });
+                if (tiktokClearBtn) tiktokClearBtn.addEventListener('click', () => {
+                    state.socialTokens.tiktok = '';
+                    if (tiktokInput) tiktokInput.value = '';
+                    saveSocialTokens();
+                    setSettingsStatus(t('socialClear'), 'ok');
+                });
+
+                // Bot link type toggle
+                if (botMiniAppBtn) botMiniAppBtn.addEventListener('click', () => {
+                    state.botLinkType = 'miniapp';
+                    safeStorage.setItem(STORAGE_KEYS.botLinkType, 'miniapp');
+                    updateBotLinkTypeUI();
+                });
+                if (botStartBtn) botStartBtn.addEventListener('click', () => {
+                    state.botLinkType = 'bot';
+                    safeStorage.setItem(STORAGE_KEYS.botLinkType, 'bot');
+                    updateBotLinkTypeUI();
+                });
+            })();
 
             if (tg && tg.MainButton) {
                 tg.MainButton.onClick(copyPrimaryAsset);

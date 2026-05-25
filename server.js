@@ -12,6 +12,9 @@ const HOST = process.env.HOST || '127.0.0.1';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const BOT_USERNAME = process.env.BOT_USERNAME || 'viral_score_bot';
+const VK_APP_ID = process.env.VK_APP_ID || '';
+const VK_APP_SECRET = process.env.VK_APP_SECRET || '';
 const INDEX_PATH = path.join(__dirname, 'index.html');
 const CONTRACT_PATH = path.join(__dirname, 'BACKEND_CONTRACT.md');
 const STATE_PATH = path.join(__dirname, 'server-state.json');
@@ -902,7 +905,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         geminiConfigured: Boolean(GEMINI_API_KEY),
         botConfigured: Boolean(BOT_TOKEN),
-        blobConfigured: false,
+        blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN),
+        botUsername: BOT_USERNAME || '',
         directUploadFallback: true
       });
     }

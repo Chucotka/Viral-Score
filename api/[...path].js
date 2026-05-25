@@ -7,6 +7,9 @@ export const maxDuration = 300;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
+const BOT_USERNAME = process.env.BOT_USERNAME || 'viral_score_bot';
+const VK_APP_ID = process.env.VK_APP_ID || '';
+const VK_APP_SECRET = process.env.VK_APP_SECRET || '';
 
 // Temporary store for Telegram video file_ids (clientId → {fileId, mimeType, ts})
 const tgVideoStore = new Map();
@@ -794,6 +797,67 @@ function linkVideoHint(urlPlatform, mode) {
   return 'Use URL context to read public page metadata and visible text. If the page is not accessible, note this in your summary and base your analysis on the user-provided context.';
 }
 
+/**
+ * Fetch video from VK using VK API access_token, then upload to Gemini.
+ */
+async function fetchVkVideoAndUploadToGemini(vkUrl, accessToken) {
+  const videoIdMatch = vkUrl.match(/video(-?\d+)_(\d+)/);
+  if (!videoIdMatch) throw new Error('Could not parse VK video ID from URL.');
+  const ownerId = videoIdMatch[1];
+  const videoId = videoIdMatch[2];
+  const videos = `${ownerId}_${videoId}`;
+  const apiUrl = `https://api.vk.com/method/video.get?videos=${encodeURIComponent(videos)}&access_token=${encodeURIComponent(accessToken)}&v=5.131`;
+  const apiRes = await fetch(apiUrl);
+  if (!apiRes.ok) throw new Error(`VK API request failed: ${apiRes.status}`);
+  const apiData = await apiRes.json();
+  if (apiData.error) throw new Error(`VK API error: ${apiData.error.error_msg || apiData.error.error_code}`);
+  const item = apiData?.response?.items?.[0];
+  if (!item) throw new Error('VK API returned no video items.');
+  const files = item.files || {};
+  const qualityOrder = ['mp4_1080', 'mp4_720', 'mp4_480', 'mp4_360', 'mp4_240'];
+  let directUrl = '';
+  for (const q of qualityOrder) {
+    if (files[q] && files[q].startsWith('http')) { directUrl = files[q]; break; }
+  }
+  if (!directUrl) throw new Error('No direct video URL in VK API response (may be private or restricted).');
+  return uploadVideoFromBlobUrl(directUrl);
+}
+
+/**
+ * Fetch a social video using a session cookie (Instagram/TikTok sessionid),
+ * extract direct video URL from page HTML, then upload to Gemini.
+ */
+async function fetchSocialVideoWithCookieAndUploadToGemini(pageUrl, platform, sessionCookie) {
+  const htmlRes = await fetch(pageUrl, {
+    headers: {
+      'Cookie': `sessionid=${sessionCookie}`,
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9'
+    }
+  });
+  if (!htmlRes.ok) throw new Error(`${platform} page fetch failed: ${htmlRes.status}`);
+  const html = await htmlRes.text();
+  let videoUrl = '';
+  if (platform === 'instagram') {
+    const m1 = html.match(/"video_url":"(https:[^"]+)"/);
+    if (m1) videoUrl = m1[1].replace(/\u0026/g, '&').replace(/\\/g, '');
+    if (!videoUrl) {
+      const m2 = html.match(/<meta property="og:video"[^>]+content="([^"]+)"/);
+      if (m2) videoUrl = m2[1];
+    }
+  } else if (platform === 'tiktok') {
+    const m1 = html.match(/"playAddr":"(https:[^"]+)"/);
+    if (m1) videoUrl = m1[1].replace(/\u0026/g, '&').replace(/\\/g, '');
+    if (!videoUrl) {
+      const m2 = html.match(/<meta property="og:video"[^>]+content="([^"]+)"/);
+      if (m2) videoUrl = m2[1];
+    }
+  }
+  if (!videoUrl) throw new Error(`Could not extract direct video URL from ${platform} page. Session may have expired or content is truly private.`);
+  return uploadVideoFromBlobUrl(videoUrl);
+}
+
 async function analyzeMultipart(formData) {
   const analysisId = normalizeAnalysisId(formData.get('analysisId'));
   const clientId = normalizeClientId(formData.get('clientId'));
@@ -808,6 +872,8 @@ async function analyzeMultipart(formData) {
   const video = formData.get('video');
   const url = String(formData.get('url') || '');
   const text = String(formData.get('text') || '');
+  const socialPlatform = String(formData.get('socialPlatform') || '').toLowerCase().trim(); // 'vk' | 'instagram' | 'tiktok'
+  const socialToken = String(formData.get('socialToken') || '').trim(); // access_token or session cookie
 
   const client = ensureClientRecord(clientId);
   if (!client) throw new Error('clientId is required.');
@@ -884,13 +950,40 @@ async function analyzeMultipart(formData) {
       }
     } else if (normalizedUrl) {
       const urlPlatform = getUrlPlatform(normalizedUrl);
-      const videoLinkHint = linkVideoHint(urlPlatform, mode);
-      requestBody = {
-        contents: [{
-          parts: [{ text: `${prompt}\n\n${videoLinkHint}\n\nPublic URL:\n${normalizedUrl}` }]
-        }],
-        tools: [{ url_context: {} }]
-      };
+      // If user provided a social auth token, try to fetch the video content server-side
+      let socialVideoUploaded = null;
+      if (socialToken && (socialPlatform === 'vk' || urlPlatform === 'vk')) {
+        try {
+          socialVideoUploaded = await fetchVkVideoAndUploadToGemini(normalizedUrl, socialToken);
+        } catch (e) {
+          console.warn('VK video fetch failed, falling back to url_context:', e.message);
+        }
+      } else if (socialToken && (socialPlatform === 'instagram' || socialPlatform === 'tiktok' || urlPlatform === 'instagram' || urlPlatform === 'tiktok')) {
+        try {
+          socialVideoUploaded = await fetchSocialVideoWithCookieAndUploadToGemini(normalizedUrl, socialPlatform || urlPlatform, socialToken);
+        } catch (e) {
+          console.warn(`${socialPlatform || urlPlatform} cookie fetch failed, falling back to url_context:`, e.message);
+        }
+      }
+      if (socialVideoUploaded?.uri) {
+        cleanupFileUri = socialVideoUploaded.uri;
+        requestBody = {
+          contents: [{
+            parts: [
+              { file_data: { file_uri: socialVideoUploaded.uri, mime_type: socialVideoUploaded.mimeType || 'video/mp4' } },
+              { text: prompt }
+            ]
+          }]
+        };
+      } else {
+        const videoLinkHint = linkVideoHint(urlPlatform, mode);
+        requestBody = {
+          contents: [{
+            parts: [{ text: `${prompt}\n\n${videoLinkHint}\n\nPublic URL:\n${normalizedUrl}` }]
+          }],
+          tools: [{ url_context: {} }]
+        };
+      }
     } else if (url.trim()) {
       requestBody = {
         contents: [{
@@ -1215,7 +1308,55 @@ export default async function handler(req, res) {
         ok: true,
         geminiConfigured: Boolean(GEMINI_API_KEY),
         botConfigured: Boolean(BOT_TOKEN),
-        blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN)
+        blobConfigured: Boolean(BLOB_READ_WRITE_TOKEN),
+        botUsername: BOT_USERNAME || ''
+      });
+    }
+
+    // ── Social Auth ─────────────────────────────────────────────────────────
+    // VK OAuth2 callback: exchange code for access_token
+    if (req.method === 'GET' && path === '/api/social-auth/vk-callback') {
+      const code = url.searchParams.get('code') || '';
+      const redirectUri = url.searchParams.get('redirect_uri') || `${baseUrl}/api/social-auth/vk-callback`;
+      if (!code) return sendJson(res, 400, { error: 'code required' });
+      if (!VK_APP_ID || !VK_APP_SECRET) return sendJson(res, 500, { error: 'VK_APP_ID / VK_APP_SECRET not configured.' });
+      try {
+        const tokenRes = await fetch(
+          `https://oauth.vk.com/access_token?client_id=${encodeURIComponent(VK_APP_ID)}&client_secret=${encodeURIComponent(VK_APP_SECRET)}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(code)}`
+        );
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok || tokenData.error) throw new Error(tokenData.error_description || tokenData.error || 'VK OAuth failed');
+        const { access_token, user_id, email } = tokenData;
+        // Return token to the frontend via postMessage-friendly HTML page
+        const html = `<!DOCTYPE html><html><body><script>
+          const payload = ${JSON.stringify({ ok: true, platform: 'vk', access_token, user_id, email })};
+          if (window.opener) { window.opener.postMessage({ type: 'social_auth_callback', ...payload }, '*'); window.close(); }
+          else { document.body.textContent = JSON.stringify(payload); }
+        <\/script></body></html>`;
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return res.end(html);
+      } catch (error) {
+        return sendJson(res, 500, { error: error?.message || 'VK OAuth failed.' });
+      }
+    }
+
+    // Return the VK OAuth authorization URL for the frontend to open
+    if (req.method === 'GET' && path === '/api/social-auth/vk-url') {
+      if (!VK_APP_ID) return sendJson(res, 500, { error: 'VK_APP_ID not configured.' });
+      const redirectUri = `${baseUrl}/api/social-auth/vk-callback`;
+      const scope = 'video,offline'; // video scope for API access
+      const authUrl = `https://oauth.vk.com/authorize?client_id=${encodeURIComponent(VK_APP_ID)}&display=popup&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code&v=5.131`;
+      return sendJson(res, 200, { authUrl, redirectUri });
+    }
+
+    // Social auth status / VK video fetch test
+    if (req.method === 'GET' && path === '/api/social-auth/status') {
+      return sendJson(res, 200, {
+        vk: { configured: Boolean(VK_APP_ID && VK_APP_SECRET) },
+        instagram: { configured: true, method: 'cookie' },
+        tiktok: { configured: true, method: 'cookie' }
       });
     }
 
