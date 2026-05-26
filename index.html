@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Viral Score</title>
+    <!-- PostHog: project API key (required for production). QA: ?analytics_debug=1 or ViralScoreAnalytics.enableDebug() -->
+    <meta name="viral-score-posthog-key" content="">
+    <meta name="viral-score-posthog-host" content="https://us.i.posthog.com">
+    <script>
+        window.VIRAL_SCORE_ANALYTICS = window.VIRAL_SCORE_ANALYTICS || {};
+    </script>
     <!-- Telegram Mini App SDK -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <!-- Google Fonts -->
@@ -1365,9 +1371,496 @@
             border-color: rgba(255, 215, 0, 0.18);
             background: rgba(255, 215, 0, 0.08);
         }
+
+        /* ── PLG landing & conversion ───────────────────────────────────── */
+        #app {
+            max-width: 520px;
+        }
+
+        .plg-hero {
+            margin-bottom: 18px;
+        }
+
+        .result-preview-card {
+            display: flex;
+            align-items: stretch;
+            gap: 14px;
+            padding: 14px 16px;
+            margin-bottom: 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(0, 255, 135, 0.28);
+            background: linear-gradient(135deg, rgba(0, 255, 135, 0.1), rgba(123, 47, 255, 0.12));
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        .result-preview-score {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-width: 72px;
+        }
+
+        .result-preview-score-value {
+            font-size: 36px;
+            font-weight: 700;
+            line-height: 1;
+            color: var(--score-high);
+            letter-spacing: -0.03em;
+        }
+
+        .result-preview-score-label {
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .result-preview-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 8px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--score-high);
+            background: rgba(0, 255, 135, 0.14);
+            border: 1px solid rgba(0, 255, 135, 0.25);
+        }
+
+        .result-preview-insights {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .result-preview-insight {
+            font-size: 12px;
+            line-height: 1.4;
+            color: var(--text-main);
+            padding-left: 10px;
+            border-left: 2px solid rgba(123, 47, 255, 0.55);
+        }
+
+        .plg-headline {
+            font-size: clamp(22px, 5.5vw, 28px);
+            font-weight: 700;
+            line-height: 1.15;
+            letter-spacing: -0.03em;
+            margin-bottom: 10px;
+        }
+
+        .plg-subheadline {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .primary-cta,
+        .primary-btn.primary-cta {
+            width: 100%;
+            font-size: 17px;
+            font-weight: 700;
+            padding: 18px 20px;
+            border-radius: 14px;
+            letter-spacing: -0.02em;
+            box-shadow: 0 8px 28px rgba(123, 47, 255, 0.45);
+        }
+
+        .primary-cta:active {
+            transform: scale(0.98);
+        }
+
+        .plg-trust {
+            margin-top: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: center;
+        }
+
+        .plg-quota-hint {
+            margin-top: 6px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.45);
+            text-align: center;
+        }
+
+        .plg-telegram-cta {
+            display: block;
+            margin-top: 12px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .plg-telegram-cta:active {
+            opacity: 0.85;
+        }
+
+        .landing-section {
+            margin-bottom: 20px;
+            padding: 16px;
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(22, 21, 42, 0.65);
+        }
+
+        .landing-section-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .landing-benefit-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .landing-benefit {
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .landing-benefit strong {
+            display: block;
+            font-size: 14px;
+            margin-bottom: 4px;
+            color: var(--text-main);
+        }
+
+        .landing-benefit span {
+            font-size: 12px;
+            line-height: 1.45;
+            color: var(--text-muted);
+        }
+
+        .landing-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .landing-step {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+        }
+
+        .landing-step-num {
+            flex-shrink: 0;
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 700;
+            background: rgba(123, 47, 255, 0.3);
+            color: var(--text-main);
+        }
+
+        .landing-step p {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-muted);
+        }
+
+        .landing-compact .landing-section--scroll {
+            display: none;
+        }
+
+        .main-input-panel {
+            margin-bottom: 16px;
+        }
+
+        .main-input-panel .section-kicker {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .history-demo-item {
+            cursor: default;
+            opacity: 0.92;
+        }
+
+        .history-demo-item .history-item-meta::after {
+            content: ' · demo';
+            color: var(--accent);
+        }
+
+        .premium-gated .asset-grid,
+        .premium-gated .insight-grid {
+            position: relative;
+        }
+
+        .premium-gated .asset-grid::after,
+        .premium-gated .insight-grid::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 12px;
+            background: linear-gradient(180deg, transparent 0%, rgba(10, 10, 18, 0.85) 70%);
+            pointer-events: none;
+        }
+
+        .results-premium-banner {
+            display: none;
+            padding: 14px 16px;
+            margin-bottom: 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(123, 47, 255, 0.35);
+            background: rgba(123, 47, 255, 0.12);
+        }
+
+        .results-premium-banner.visible {
+            display: block;
+        }
+
+        .results-premium-banner p {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+        }
+
+        .paywall-modal .modal-content {
+            max-width: 400px;
+        }
+
+        .paywall-modal-score {
+            font-size: 42px;
+            font-weight: 700;
+            color: var(--score-high);
+            text-align: center;
+            margin: 8px 0 4px;
+        }
+
+        .paywall-modal-title {
+            font-size: 20px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .paywall-modal-desc {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            text-align: center;
+            margin-bottom: 18px;
+        }
+
+        .paywall-modal-list {
+            font-size: 13px;
+            color: var(--text-main);
+            margin-bottom: 18px;
+            padding-left: 0;
+            list-style: none;
+        }
+
+        .paywall-modal-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .paywall-modal-list li::before {
+            content: '✓ ';
+            color: var(--score-high);
+        }
+
+        .result-preview-badge-extra {
+            display: none;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-top: 6px;
+        }
+
+        .result-preview-card[data-preview-variant="b"] .result-preview-badge-extra[data-preview-badge="real"],
+        .result-preview-card[data-preview-variant="c"] .result-preview-badge-extra[data-preview-badge="sample"] {
+            display: block;
+        }
+
+        .premium-insights-section {
+            margin-top: 8px;
+            margin-bottom: 16px;
+        }
+
+        .premium-insights-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .premium-teaser-card {
+            position: relative;
+            border-radius: 14px;
+            border: 1px solid rgba(123, 47, 255, 0.28);
+            background: rgba(18, 18, 28, 0.92);
+            overflow: hidden;
+        }
+
+        .premium-teaser-card-inner {
+            padding: 14px 16px;
+            transition: filter 0.25s ease, opacity 0.25s ease;
+        }
+
+        .premium-teaser-card.is-gated .premium-teaser-card-inner {
+            filter: blur(5px);
+            opacity: 0.72;
+            user-select: none;
+            pointer-events: none;
+        }
+
+        .premium-teaser-card-title {
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--accent);
+            margin-bottom: 8px;
+        }
+
+        .premium-teaser-card-body {
+            font-size: 14px;
+            line-height: 1.5;
+            color: var(--text-main);
+            white-space: pre-wrap;
+        }
+
+        .premium-teaser-overlay {
+            display: none;
+            position: absolute;
+            inset: 0;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            background: linear-gradient(180deg, rgba(10, 10, 18, 0.35) 0%, rgba(10, 10, 18, 0.82) 55%);
+            text-align: center;
+        }
+
+        .premium-teaser-card.is-gated .premium-teaser-overlay {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .premium-teaser-overlay p {
+            font-size: 13px;
+            line-height: 1.45;
+            color: var(--text-muted);
+            max-width: 280px;
+        }
+
+        .premium-teaser-overlay .primary-btn {
+            width: auto;
+            min-width: 200px;
+            padding: 10px 18px;
+            font-size: 14px;
+        }
+
+        #analytics-debug-panel {
+            display: none;
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            z-index: 10000;
+            width: min(360px, calc(100vw - 20px));
+            max-height: 200px;
+            overflow: auto;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(123, 47, 255, 0.5);
+            background: rgba(10, 10, 18, 0.94);
+            font-size: 10px;
+            line-height: 1.35;
+            color: #c8c8d8;
+            pointer-events: none;
+            font-family: ui-monospace, monospace;
+        }
+
+        #analytics-debug-panel.visible {
+            display: block;
+        }
+
+        #analytics-debug-panel.expanded {
+            max-height: min(70vh, 480px);
+        }
+
+        #analytics-debug-panel strong {
+            color: var(--score-high);
+            font-weight: 600;
+        }
+
+        #analytics-debug-panel .analytics-debug-props {
+            color: #8888aa;
+            font-size: 9px;
+        }
+
+        #analytics-debug-panel .analytics-debug-warn {
+            color: #ffb347;
+            font-size: 9px;
+        }
+
+        #analytics-debug-badge {
+            display: none;
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            z-index: 10000;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(123, 47, 255, 0.85);
+            color: #fff;
+            font-size: 10px;
+            font-weight: 700;
+            pointer-events: none;
+        }
+
+        #analytics-debug-badge.visible {
+            display: block;
+        }
+
+        @media (max-width: 400px) {
+            .result-preview-card {
+                flex-direction: column;
+            }
+            .result-preview-score {
+                flex-direction: row;
+                flex-wrap: wrap;
+                gap: 8px;
+                justify-content: flex-start;
+            }
+        }
     </style>
 </head>
 <body>
+    <div id="analytics-debug-badge" aria-hidden="true">analytics debug</div>
+    <div id="analytics-debug-panel" aria-live="polite"></div>
     <div id="app">
         <header>
             <button type="button" class="app-title-btn" id="app-home-btn" data-i18n="appTitle">⚡ Viral Score</button>
@@ -1385,34 +1878,77 @@
             </div>
         </header>
 
-        <!-- Main Screen -->
+        <!-- Main Screen — PLG hero + landing (conversion tunnel) -->
         <main id="main-screen" class="screen active">
-            <div class="status-row fade-in-up" style="animation-delay: 10ms;">
+            <section class="plg-hero fade-in-up" id="plg-hero" aria-label="Product offer">
+                <!-- ResultPreviewCard: outcome before click (PLG) -->
+                <div class="result-preview-card" id="result-preview-card" aria-label="Example analysis" data-preview-variant="a">
+                    <div class="result-preview-score">
+                        <div class="result-preview-score-value" id="preview-score-value">85</div>
+                        <div class="result-preview-score-label" data-i18n="previewScoreLabel">Viral Score</div>
+                        <div class="result-preview-badge" id="preview-potential-badge" data-i18n="previewPotential">High viral potential</div>
+                        <div class="result-preview-badge-extra" data-preview-badge="real" data-i18n="previewRealExample">Real example</div>
+                        <div class="result-preview-badge-extra" data-preview-badge="sample" data-i18n="previewSample8s">Sample result in 8 seconds</div>
+                    </div>
+                    <div class="result-preview-insights" id="preview-insights">
+                        <div class="result-preview-insight" data-i18n="previewInsight1">Hook hits in the first 2 seconds</div>
+                        <div class="result-preview-insight" data-i18n="previewInsight2">Retention risk: payoff comes too late</div>
+                        <div class="result-preview-insight" data-i18n="previewInsight3">CTA is clear — ready to post</div>
+                    </div>
+                </div>
+                <h2 class="plg-headline" id="plg-headline" data-i18n="heroHeadline">Know if your content can go viral before you post</h2>
+                <p class="plg-subheadline" data-i18n="heroSubheadline">Get an instant viral score, hook breakdown, and practical fixes in seconds.</p>
+                <button type="button" class="primary-btn primary-cta" id="hero-primary-cta" data-i18n="primaryCta">Analyze free now</button>
+                <p class="plg-trust" data-i18n="heroTrust">No signup for your first analysis</p>
+                <p class="plg-quota-hint hidden" id="quota-hint"></p>
+                <a class="plg-telegram-cta hidden" id="open-telegram-cta" href="#" data-i18n="openInTelegram">Open in Telegram for Stars unlock →</a>
+            </section>
+
+            <section class="landing-section landing-section--scroll fade-in-up" id="landing-proof">
+                <div class="landing-section-title" data-i18n="proofTitle">Why creators use it</div>
+                <div class="landing-benefit-grid">
+                    <div class="landing-benefit">
+                        <strong data-i18n="proofBenefit1Title">See viral score instantly</strong>
+                        <span data-i18n="proofBenefit1Desc">One number plus hook, retention, and clarity — before you publish.</span>
+                    </div>
+                    <div class="landing-benefit">
+                        <strong data-i18n="proofBenefit2Title">Get hook &amp; retention breakdown</strong>
+                        <span data-i18n="proofBenefit2Desc">Know what to fix in the first 3 seconds and mid-roll.</span>
+                    </div>
+                    <div class="landing-benefit">
+                        <strong data-i18n="proofBenefit3Title">Improve content before posting</strong>
+                        <span data-i18n="proofBenefit3Desc">Rewritten hook, caption, and CTA you can paste into your post.</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="landing-section landing-section--scroll fade-in-up" id="landing-how">
+                <div class="landing-section-title" data-i18n="howTitle">How it works</div>
+                <div class="landing-steps">
+                    <div class="landing-step">
+                        <div class="landing-step-num">1</div>
+                        <p data-i18n="howStep1">Upload or paste your content</p>
+                    </div>
+                    <div class="landing-step">
+                        <div class="landing-step-num">2</div>
+                        <p data-i18n="howStep2">Get AI score and breakdown in seconds</p>
+                    </div>
+                    <div class="landing-step">
+                        <div class="landing-step-num">3</div>
+                        <p data-i18n="howStep3">Unlock export &amp; full insights in Telegram</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="landing-section landing-section--scroll fade-in-up" id="landing-telegram">
+                <div class="landing-section-title" data-i18n="telegramTitle">Built for Telegram</div>
+                <p class="plg-subheadline" style="margin-bottom:0;" data-i18n="telegramDesc">Deep actions — full report, export, and upgrades — run inside the Telegram Mini App with seamless Telegram Stars payments.</p>
+            </section>
+
+            <div class="status-row hidden" id="main-status-row" aria-hidden="true">
                 <div class="status-pill" id="backend-status-pill">
                     <span class="status-pill-dot"></span>
                     <span data-i18n="backendChecking">Backend checking...</span>
-                </div>
-            </div>
-
-            <div class="intro-card fade-in-up" style="animation-delay: 20ms;">
-                <div class="intro-visual">
-                    <img id="hero-image" src="" alt="Viral Score hero" loading="eager" decoding="async">
-                </div>
-                <div class="intro-title" data-i18n="introTitle">Upload, score, improve</div>
-                <div class="intro-text" data-i18n="introText">Paste a link, upload a short video, or drop in a caption. The app scores virality, explains why, and rewrites the hook, caption, and CTA.</div>
-                <div class="step-row">
-                    <div class="step-chip">
-                        <div class="step-num">1</div>
-                        <span data-i18n="stepOne">Add a video, link, or text</span>
-                    </div>
-                    <div class="step-chip">
-                        <div class="step-num">2</div>
-                        <span data-i18n="stepTwo">Pick platform and analysis mode</span>
-                    </div>
-                    <div class="step-chip">
-                        <div class="step-num">3</div>
-                        <span data-i18n="stepThree">Get a score and better copy</span>
-                    </div>
                 </div>
             </div>
 
@@ -1426,11 +1962,12 @@
                 </div>
             </div>
 
-            <div class="input-shell fade-in-up" style="animation-delay: 50ms;">
+            <div class="main-input-panel input-shell fade-in-up" id="analyze-section" style="animation-delay: 50ms;">
+                <div class="section-kicker" data-i18n="inputKicker">Your content</div>
                 <div class="segmented" id="source-selector">
-                    <button class="active" data-source="video-file" data-i18n="sourceUpload">Upload video</button>
+                    <button data-source="video-file" data-i18n="sourceUpload">Upload video</button>
                     <button data-source="video-url" data-i18n="sourceLink">Video link</button>
-                    <button data-source="text" data-i18n="sourceText">Text only</button>
+                    <button class="active" data-source="text" data-i18n="sourceText">Text only</button>
                 </div>
 
                 <div class="input-stack">
@@ -1489,7 +2026,7 @@
                 </div>
                 <p class="mode-hint" id="mode-hint"></p>
 
-                <button class="primary-btn" id="analyze-btn"><span data-i18n="analyzeButton">Analyze viral score</span> &rarr;</button>
+                <button type="button" class="primary-btn primary-cta" id="analyze-btn"><span data-i18n="primaryCta">Analyze free now</span></button>
                 <div id="main-error" class="error-message"></div>
                 <div class="retry-row hidden" id="error-actions">
                     <button class="retry-btn" id="retry-btn" type="button" data-i18n="retryAnalysis">Retry analysis</button>
@@ -1497,21 +2034,15 @@
                 </div>
             </div>
 
-            <div class="input-shell fade-in-up" style="animation-delay: 120ms;">
-                <div class="section-title" data-i18n="monetizationTitle">Monetization</div>
-                <div class="source-note" id="quota-label"></div>
-                <div class="preview-actions" style="margin-top:12px;">
-                    <button class="secondary-btn" id="stars-pay-btn" type="button" data-i18n="unlockStars">Unlock with Stars</button>
-                    <button class="secondary-btn" id="card-pay-btn" type="button" data-i18n="payCard">Pay by card</button>
-                    <button class="secondary-btn" id="tribute-pay-btn" type="button" data-i18n="supportTribute">Support via Tribute</button>
-                </div>
-            </div>
+            <section class="landing-section landing-footer-cta landing-section--scroll fade-in-up" id="landing-footer-cta">
+                <button type="button" class="primary-btn primary-cta" id="footer-primary-cta" data-i18n="primaryCta">Analyze free now</button>
+                <p class="plg-trust" data-i18n="heroTrust">No signup for your first analysis</p>
+            </section>
 
             <div style="margin-top: 24px;">
                 <div class="section-title fade-in-up" style="animation-delay: 150ms;" data-i18n="recentAnalyses">Recent Analyses</div>
-                <div class="history-list" id="history-list">
-                    <div class="history-empty" id="history-empty" data-i18n="noAnalyses">No analyses yet.</div>
-                </div>
+                <div class="history-list" id="history-list"></div>
+                <div class="history-empty hidden" id="history-empty" data-i18n="noAnalyses">No analyses yet.</div>
             </div>
 
             <div class="powered-by" data-i18n="poweredBy">Powered by AI</div>
@@ -1614,18 +2145,28 @@
                 </div>
             </div>
 
+            <div class="premium-insights-section fade-in-up hidden" id="premium-insights-section" style="animation-delay: 1150ms;">
+                <div class="section-title" data-i18n="premiumInsightsTitle">Premium insights</div>
+                <div class="premium-insights-grid" id="premium-insights-grid"></div>
+            </div>
+
             <div class="section-title fade-in-up" style="animation-delay: 1200ms;" data-i18n="recentAnalyses">Recent Analyses</div>
             <div class="history-list" id="results-history-list"></div>
 
+            <div class="results-premium-banner" id="results-premium-banner">
+                <p data-i18n="resultsPremiumTeaser">You saw your score. Unlock the full report, exports, and rewritten assets in Telegram.</p>
+                <button type="button" class="primary-btn primary-cta" id="results-unlock-cta" data-i18n="paywallCta">Unlock with Telegram Stars</button>
+            </div>
+
             <div class="results-dock fade-in-up" style="animation-delay: 1300ms;">
-                <button type="button" class="primary-btn" id="back-home-main-btn" data-i18n="backToHome">Back to home</button>
+                <button type="button" class="secondary-btn" id="analyze-again-btn" data-i18n="newAnalysis">New analysis</button>
+                <button type="button" class="secondary-btn" id="back-home-main-btn" data-i18n="backToHome">Back to home</button>
                 <div class="results-dock-row">
-                    <button type="button" class="secondary-btn" id="analyze-again-btn" data-i18n="newAnalysis">New analysis</button>
-                    <button type="button" class="secondary-btn" id="copy-report-btn" data-i18n="copyReport">Copy Report</button>
+                    <button type="button" class="secondary-btn" id="copy-report-btn" data-i18n="copyReport">Copy full report</button>
+                    <button type="button" class="secondary-btn" id="download-report-btn" data-i18n="downloadReport">Download report</button>
                 </div>
                 <div class="results-dock-row">
-                    <button type="button" class="secondary-btn" id="download-report-btn" data-i18n="downloadReport">Download Report</button>
-                    <button type="button" class="secondary-btn" style="background-color: rgba(123, 47, 255, 0.1); color: var(--accent);" id="share-btn" data-i18n="shareResult">Share Result</button>
+                    <button type="button" class="secondary-btn" style="background-color: rgba(123, 47, 255, 0.1); color: var(--accent);" id="share-btn" data-i18n="shareResult">Share score</button>
                 </div>
             </div>
         </div>
@@ -1720,7 +2261,37 @@
         </div>
     </div>
 
+    <!-- Telegram Stars paywall — shown after value (export / full report), not on entry -->
+    <div class="modal-overlay paywall-modal" id="stars-paywall-modal" role="dialog" aria-modal="true" aria-labelledby="paywall-modal-title">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="close-paywall-btn" aria-label="Close">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <div class="paywall-modal-score" id="paywall-modal-score">—</div>
+            <div class="paywall-modal-title" id="paywall-modal-title" data-i18n="paywallTitle">Unlock full report</div>
+            <p class="paywall-modal-desc" id="paywall-modal-desc" data-i18n="paywallDesc">Export, copy all assets, and keep analyzing with unlimited access.</p>
+            <ul class="paywall-modal-list">
+                <li data-i18n="paywallFeature1">Full report download</li>
+                <li data-i18n="paywallFeature2">Copy hook, caption &amp; CTA</li>
+                <li data-i18n="paywallFeature3">Unlimited analyses</li>
+            </ul>
+            <button type="button" class="primary-btn primary-cta" id="paywall-stars-btn" data-i18n="paywallCta">Unlock with Telegram Stars</button>
+            <p class="plg-trust" data-i18n="paywallTrust">Pay inside Telegram · no card required</p>
+        </div>
+    </div>
+
     <script>
+        /**
+         * PLG conversion funnel (Product-Led Growth)
+         * 1. Landing hero: outcome preview (ResultPreviewCard) + single Primary CTA
+         * 2. Free analysis without signup (quota on server)
+         * 3. Paywall only on high intent: export, full report, copy assets (TelegramStarsPaywallModal)
+         * 4. External traffic → Telegram bot link (open-telegram-cta on web)
+         * Marketing short-form: score hook (0–2s) → UI process (3–5s) → CTA Try in Telegram (last 2s)
+         */
         const screens = {
             main: document.getElementById('main-screen'),
             loading: document.getElementById('loading-screen'),
@@ -1745,18 +2316,24 @@
         const draftBanner = document.getElementById('draft-banner');
         const clearDraftBtn = document.getElementById('clear-draft-btn');
         const backendStatusPill = document.getElementById('backend-status-pill');
-        const quotaLabel = document.getElementById('quota-label');
         const botUsernameInput = document.getElementById('bot-username-input');
         const launchChecklist = document.getElementById('launch-checklist');
         const analyzeBtn = document.getElementById('analyze-btn');
-        const analyzeBtnLabel = analyzeBtn?.querySelector('[data-i18n="analyzeButton"]');
+        const analyzeBtnLabel = analyzeBtn?.querySelector('[data-i18n="primaryCta"]');
         const appHomeBtn = document.getElementById('app-home-btn');
         const backHomeTopBtn = document.getElementById('back-home-top-btn');
         const backHomeMainBtn = document.getElementById('back-home-main-btn');
         const analyzeAgainBtn = document.getElementById('analyze-again-btn');
-        const starsPayBtn = document.getElementById('stars-pay-btn');
-        const cardPayBtn = document.getElementById('card-pay-btn');
-        const tributePayBtn = document.getElementById('tribute-pay-btn');
+        const heroPrimaryCta = document.getElementById('hero-primary-cta');
+        const footerPrimaryCta = document.getElementById('footer-primary-cta');
+        const starsPaywallModal = document.getElementById('stars-paywall-modal');
+        const closePaywallBtn = document.getElementById('close-paywall-btn');
+        const paywallStarsBtn = document.getElementById('paywall-stars-btn');
+        const resultsUnlockCta = document.getElementById('results-unlock-cta');
+        const resultsPremiumBanner = document.getElementById('results-premium-banner');
+        const quotaHintEl = document.getElementById('quota-hint');
+        const openTelegramCta = document.getElementById('open-telegram-cta');
+        const paywallModalScore = document.getElementById('paywall-modal-score');
         const settingsStatus = document.getElementById('settings-status');
         const loadingTextElement = document.getElementById('loading-text');
         const historyList = document.getElementById('history-list');
@@ -1777,7 +2354,31 @@
         const videoPreviewEl = document.getElementById('video-preview-el');
         const videoFileMeta = document.getElementById('video-file-meta');
         const removeVideoBtn = document.getElementById('remove-video-btn');
-        const heroImage = document.getElementById('hero-image');
+        /** Demo caption for empty-state PLG (frictionless first run). */
+        const DEMO_TEXT_EN = 'Wake up at 5am, cold shower, journaling, gym. My morning routine that changed my life. Drop a 🔥 if you want part 2.';
+        const DEMO_TEXT_RU = 'Просыпаюсь в 5 утра, холодный душ, дневник, зал. Утренняя рутина, которая изменила жизнь. Поставь 🔥 если хочешь часть 2.';
+        const DEMO_RESULT = {
+            viral_score: 85,
+            hook_strength: 88,
+            retention_score: 72,
+            clarity_score: 90,
+            shareability_score: 80,
+            cta_score: 76,
+            platform_fit_score: 84,
+            first_three_seconds_score: 86,
+            strengths: ['Strong curiosity hook', 'Clear routine structure', 'High save/share topic'],
+            risks: ['Payoff could land 2s earlier', 'Visual proof is light'],
+            suggestions: ['Open with the transformation result', 'Add on-screen text for each step', 'End with a direct part 2 CTA'],
+            next_actions: ['Film B-roll for each step', 'Test a question-led hook'],
+            summary: 'High viral potential for routine content — tighten the opening and add visual proof in the first 3 seconds.',
+            hook_insight: 'The promise is clear; make the first frame impossible to skip.',
+            retention_insight: 'List format works — add pattern breaks every 2–3 seconds.',
+            shareability_insight: 'Self-improvement routines travel well in saves and shares.',
+            platform_fit_insight: 'Fits short-form discovery on Instagram and TikTok.',
+            improved_hook: 'I tried the 5am routine for 30 days — here is what actually changed.',
+            improved_caption: 'Cold shower, journal, gym — the stack that fixed my mornings. Save this if you are building your routine.',
+            improved_cta: 'Comment ROUTINE for my full checklist.'
+        };
         const postUrlInput = document.getElementById('post-url-input');
         const linkPreview = document.getElementById('link-preview');
         const postInput = document.getElementById('post-input');
@@ -1806,6 +2407,10 @@
         const copyReportBtn = document.getElementById('copy-report-btn');
         const downloadReportBtn = document.getElementById('download-report-btn');
         const shareBtn = document.getElementById('share-btn');
+        const plgHeadlineEl = document.getElementById('plg-headline');
+        const resultPreviewCard = document.getElementById('result-preview-card');
+        const premiumInsightsSection = document.getElementById('premium-insights-section');
+        const premiumInsightsGrid = document.getElementById('premium-insights-grid');
 
         const STORAGE_KEYS = {
             apiKey: 'gemini_api_key',
@@ -1854,8 +2459,54 @@
                 modeHintPro: 'Detailed creator analysis with specific next steps.',
                 modeHintAd: 'For ads and paid creatives: hook, retention, clarity, and conversion matter most.',
                 unlockPending: 'Payment received. Waiting for server confirmation — try again in a few seconds or tap Retry.',
-                analyzeButton: 'Analyze viral score',
+                analyzeButton: 'Analyze free now',
+                primaryCta: 'Analyze free now',
                 analyzeLoading: 'Analyzing...',
+                heroHeadline: 'Know if your content can go viral before you post',
+                heroSubheadline: 'Get an instant viral score, hook breakdown, and practical fixes in seconds',
+                heroTrust: 'No signup for your first analysis',
+                previewScoreLabel: 'Viral Score',
+                previewPotential: 'High viral potential',
+                previewInsight1: 'Hook hits in the first 2 seconds',
+                previewInsight2: 'Retention risk: payoff comes too late',
+                previewInsight3: 'CTA is clear — ready to post',
+                previewRealExample: 'Real example',
+                previewSample8s: 'Sample result in 8 seconds',
+                premiumInsightsTitle: 'Premium insights',
+                premiumHookTitle: 'Advanced hook rewrite',
+                premiumCtaTitle: 'Stronger CTA pack',
+                premiumAngleTitle: 'Competitor-style angle',
+                premiumPlatformTitle: 'Platform-specific optimization',
+                premiumUnlockOverlay: 'Unlock advanced rewrites, CTA variants, angles, and platform tips.',
+                premiumUnlockCta: 'Unlock full insights',
+                inputKicker: 'Your content',
+                proofTitle: 'Why creators use it',
+                proofBenefit1Title: 'See viral score instantly',
+                proofBenefit1Desc: 'One number plus hook, retention, and clarity — before you publish.',
+                proofBenefit2Title: 'Get hook & retention breakdown',
+                proofBenefit2Desc: 'Know what to fix in the first 3 seconds and mid-roll.',
+                proofBenefit3Title: 'Improve content before posting',
+                proofBenefit3Desc: 'Rewritten hook, caption, and CTA you can paste into your post.',
+                howTitle: 'How it works',
+                howStep1: 'Upload or paste your content',
+                howStep2: 'Get AI score and breakdown in seconds',
+                howStep3: 'Unlock export & full insights in Telegram',
+                telegramTitle: 'Built for Telegram',
+                telegramDesc: 'Full report, export, and upgrades run in the Telegram Mini App — pay with Telegram Stars in one tap.',
+                openInTelegram: 'Open in Telegram →',
+                paywallTitle: 'Unlock full report',
+                paywallDesc: 'You already saw your score. Export, copy all assets, and keep analyzing without limits.',
+                paywallCta: 'Unlock with Telegram Stars',
+                paywallTrust: 'Pay inside Telegram · no card required',
+                paywallFeature1: 'Full report download',
+                paywallFeature2: 'Copy hook, caption & CTA',
+                paywallFeature3: 'Unlimited analyses',
+                paywallAnalyzeLimit: 'Free analyses used. Unlock with Telegram Stars to continue.',
+                resultsPremiumTeaser: 'You saw your score. Unlock the full report, exports, and rewritten assets.',
+                quotaHintFree: (left, total) => `${left} of ${total} free analyses left`,
+                quotaHintUnlimited: 'Unlimited access active',
+                historyDemoTitle: 'Morning routine reel (demo)',
+                historyDemoHint: 'Tap the demo to preview a sample report — then run your own free analysis.',
                 appTitle: '⚡ Viral Score',
                 backToHome: 'Back to home',
                 newAnalysis: 'New analysis',
@@ -2050,8 +2701,54 @@
                 modeHintPro: 'Подробный разбор с конкретными шагами для автора.',
                 modeHintAd: 'Для рекламы и таргета: важны хук, удержание, ясность оффера и конверсия.',
                 unlockPending: 'Оплата прошла. Ждём подтверждение сервера — подожди несколько секунд или нажми «Повторить».',
-                analyzeButton: 'Оценить viral score',
+                analyzeButton: 'Анализ бесплатно',
+                primaryCta: 'Анализ бесплатно',
                 analyzeLoading: 'Анализируем...',
+                heroHeadline: 'Узнай, зайдёт ли контент в viral, до публикации',
+                heroSubheadline: 'Мгновенный viral score, разбор хука и конкретные правки за секунды',
+                heroTrust: 'Без регистрации для первого анализа',
+                previewScoreLabel: 'Viral Score',
+                previewPotential: 'Высокий viral-потенциал',
+                previewInsight1: 'Хук цепляет в первые 2 секунды',
+                previewInsight2: 'Риск удержания: payoff слишком поздно',
+                previewInsight3: 'CTA понятный — можно постить',
+                previewRealExample: 'Реальный пример',
+                previewSample8s: 'Пример результата за 8 секунд',
+                premiumInsightsTitle: 'Premium-инсайты',
+                premiumHookTitle: 'Продвинутый rewrite хука',
+                premiumCtaTitle: 'Сильные варианты CTA',
+                premiumAngleTitle: 'Угол в стиле конкурентов',
+                premiumPlatformTitle: 'Оптимизация под платформу',
+                premiumUnlockOverlay: 'Открой продвинутые rewrites, варианты CTA, углы и советы под платформу.',
+                premiumUnlockCta: 'Открыть все инсайты',
+                inputKicker: 'Твой контент',
+                proofTitle: 'Зачем это креаторам',
+                proofBenefit1Title: 'Viral score сразу',
+                proofBenefit1Desc: 'Одна цифра плюс хук, удержание и ясность — до публикации.',
+                proofBenefit2Title: 'Разбор хука и удержания',
+                proofBenefit2Desc: 'Поймёшь, что чинить в первых 3 секундах и в середине.',
+                proofBenefit3Title: 'Улучши до поста',
+                proofBenefit3Desc: 'Готовые hook, caption и CTA — вставь в пост.',
+                howTitle: 'Как это работает',
+                howStep1: 'Загрузи или вставь контент',
+                howStep2: 'Получи AI-оценку и разбор за секунды',
+                howStep3: 'Экспорт и полный отчёт — в Telegram',
+                telegramTitle: 'Сделано для Telegram',
+                telegramDesc: 'Полный отчёт, экспорт и апгрейды в Mini App — оплата Telegram Stars в один тап.',
+                openInTelegram: 'Открыть в Telegram →',
+                paywallTitle: 'Открыть полный отчёт',
+                paywallDesc: 'Ты уже видел score. Экспорт, копирование ассетов и безлимитные анализы.',
+                paywallCta: 'Разблокировать через Telegram Stars',
+                paywallTrust: 'Оплата в Telegram · без карты',
+                paywallFeature1: 'Скачать полный отчёт',
+                paywallFeature2: 'Копировать hook, caption и CTA',
+                paywallFeature3: 'Безлимитные анализы',
+                paywallAnalyzeLimit: 'Бесплатные анализы закончились. Разблокируй через Telegram Stars.',
+                resultsPremiumTeaser: 'Ты видел score. Открой полный отчёт, экспорт и переписанные ассеты.',
+                quotaHintFree: (left, total) => `Осталось ${left} из ${total} бесплатных анализов`,
+                quotaHintUnlimited: 'Безлимитный доступ активен',
+                historyDemoTitle: 'Утренняя рутина (демо)',
+                historyDemoHint: 'Нажми на демо, чтобы увидеть пример отчёта — затем запусти свой бесплатный анализ.',
                 appTitle: '⚡ Viral Score',
                 backToHome: 'На главную',
                 newAnalysis: 'Новый анализ',
@@ -2333,6 +3030,1212 @@
             removeItem(key) { try { if (localStore) localStore.removeItem(key); } catch {} }
         };
 
+        /* ===== Analytics: tracking plan, PostHog adapter, QA (vendor-agnostic) ===== */
+        const POSTHOG_CLIENT_CONFIG = {
+            autocapture: false,
+            capture_pageview: false,
+            capture_pageleave: false,
+            capture_performance: false,
+            disable_session_recording: true
+        };
+        const ANALYTICS_EVENTS = {
+            landing_view: 'landing_view',
+            hero_cta_click: 'hero_cta_click',
+            primary_cta_click: 'primary_cta_click',
+            demo_result_view: 'demo_result_view',
+            analysis_started: 'analysis_started',
+            analysis_completed: 'analysis_completed',
+            analysis_failed: 'analysis_failed',
+            quota_limit_hit: 'quota_limit_hit',
+            paywall_shown: 'paywall_shown',
+            paywall_cta_click: 'paywall_cta_click',
+            stars_checkout_started: 'stars_checkout_started',
+            stars_checkout_success: 'stars_checkout_success',
+            stars_checkout_failed: 'stars_checkout_failed',
+            premium_unlock_success: 'premium_unlock_success',
+            copy_full_report_click: 'copy_full_report_click',
+            copy_hook_click: 'copy_hook_click',
+            copy_caption_click: 'copy_caption_click',
+            copy_cta_click: 'copy_cta_click',
+            download_report_click: 'download_report_click',
+            telegram_open_click: 'telegram_open_click',
+            experiment_assigned: 'experiment_assigned'
+        };
+
+        /** PostHog funnel (clean step names): landing_view → primary_cta_click|hero_cta_click → analysis_started → analysis_completed → paywall_shown → stars_checkout_started → stars_checkout_success → premium_unlock_success */
+        const FUNNEL_ONCE_KEYS = {
+            landing_view: 'landing_view',
+            cta_engagement: 'cta_engagement',
+            analysis_completed: 'analysis_completed',
+            stars_checkout_success: 'stars_checkout_success',
+            premium_unlock_success: 'premium_unlock_success'
+        };
+
+        /** Launch-critical events — must appear in PostHog Live with expected props (no accidental duplicates). */
+        const FUNNEL_CRITICAL_EVENTS = [
+            ANALYTICS_EVENTS.landing_view,
+            ANALYTICS_EVENTS.experiment_assigned,
+            ANALYTICS_EVENTS.hero_cta_click,
+            ANALYTICS_EVENTS.primary_cta_click,
+            ANALYTICS_EVENTS.analysis_started,
+            ANALYTICS_EVENTS.analysis_completed,
+            ANALYTICS_EVENTS.paywall_shown,
+            ANALYTICS_EVENTS.stars_checkout_started,
+            ANALYTICS_EVENTS.stars_checkout_success,
+            ANALYTICS_EVENTS.premium_unlock_success
+        ];
+
+        /**
+         * Manual QA smoke (before traffic):
+         * 1) First landing → landing_view + experiment_assigned (headline only)
+         * 2) Hero/footer/form CTA → hero_cta_click / primary_cta_click (primary once per session)
+         * 3) Analysis success → analysis_started + analysis_completed (each run, new interaction_id)
+         * 4) Analysis error → analysis_failed (retry fires again)
+         * 5) Premium teaser → paywall_shown (premium_teaser) + paywall_cta_click
+         * 6) Quota exceeded → quota_limit_hit + paywall_shown (quota_exceeded)
+         * 7) Stars paid → stars_checkout_success + premium_unlock_success (once each)
+         * 8) Stars cancel → stars_checkout_failed
+         * 9) Language switch → no landing_view / experiment_assigned repeat
+         * 10) Modal reopen → paywall_shown again, new interaction_id
+         * 11) Second analysis same session → analysis_started again, analysis_completed not re-fired (funnel completion once)
+         *
+         * Debug: ?analytics_debug=1 | localStorage vs_analytics_debug=1 | ViralScoreAnalytics.enableDebug()
+         * Console: ViralScoreAnalytics.runQaChecklist() | ViralScoreAnalytics.reportingSpec
+         */
+        const TRACKING_PLAN = {
+            landing_view: {
+                event: ANALYTICS_EVENTS.landing_view,
+                funnelCritical: true,
+                trigger: 'initGrowthLayer (once per session)',
+                required: ['source'],
+                optional: ['platform', 'lang', 'session_id', 'bucket_headline'],
+                kpi: 'Session entry / top of funnel',
+                dedup: 'funnel_once:landing_view',
+                exampleProps: {
+                    source: 'landing',
+                    platform: 'web',
+                    lang: 'en',
+                    session_id: 'vs_...uuid...',
+                    bucket_headline: 'a'
+                }
+            },
+            experiment_assigned: {
+                event: ANALYTICS_EVENTS.experiment_assigned,
+                funnelCritical: true,
+                trigger: 'trackExperimentAssignmentsOnce in initGrowthLayer',
+                required: ['experiment', 'bucket'],
+                optional: ['source', 'platform', 'lang', 'bucket_headline'],
+                kpi: 'A/B assignment (ACTIVE_EXPERIMENTS only: headline_test)',
+                dedup: 'session_once:experimentsAssignedTracked',
+                exampleProps: {
+                    experiment: 'headline_test',
+                    bucket: 'b',
+                    source: 'hash',
+                    platform: 'telegram-mini-app',
+                    lang: 'ru',
+                    bucket_headline: 'b',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            hero_cta_click: {
+                event: ANALYTICS_EVENTS.hero_cta_click,
+                funnelCritical: true,
+                trigger: 'trackCtaEngagement when source=hero',
+                required: ['source'],
+                optional: ['platform', 'lang', 'bucket_headline'],
+                kpi: 'Hero CTA CTR (may co-occur with primary_cta_click on hero tap)',
+                dedup: 'none',
+                exampleProps: {
+                    source: 'hero',
+                    platform: 'telegram-mini-app',
+                    lang: 'en',
+                    bucket_headline: 'c',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            primary_cta_click: {
+                event: ANALYTICS_EVENTS.primary_cta_click,
+                funnelCritical: true,
+                trigger: 'trackCtaEngagement (hero|footer|form analyze btn)',
+                required: ['source'],
+                optional: ['platform', 'lang', 'bucket_headline'],
+                kpi: 'Primary CTA → analysis intent',
+                dedup: 'funnel_once:cta_engagement',
+                exampleProps: {
+                    source: 'form',
+                    platform: 'web',
+                    lang: 'en',
+                    bucket_headline: 'a',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            demo_result_view: {
+                event: ANALYTICS_EVENTS.demo_result_view,
+                trigger: 'history demo click',
+                required: ['source'],
+                optional: ['score'],
+                kpi: 'PLG demo engagement',
+                dedup: 'none'
+            },
+            analysis_started: {
+                event: ANALYTICS_EVENTS.analysis_started,
+                funnelCritical: true,
+                trigger: 'analyzeContent (after validation)',
+                required: ['source', 'input_type', 'interaction_id'],
+                optional: ['analysis_mode', 'platform', 'lang', 'score_band'],
+                kpi: 'Analysis start rate',
+                dedup: 'none (one per analyze run)',
+                exampleProps: {
+                    source: 'form',
+                    input_type: 'text',
+                    interaction_id: 'analysis_...id...',
+                    analysis_mode: 'quick',
+                    platform: 'web',
+                    lang: 'en',
+                    bucket_headline: 'b',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            analysis_completed: {
+                event: ANALYTICS_EVENTS.analysis_completed,
+                funnelCritical: true,
+                trigger: 'analyzeContent success',
+                required: ['source', 'input_type', 'interaction_id'],
+                optional: ['score', 'score_band', 'platform', 'lang'],
+                kpi: 'Analysis completion / PLG value',
+                dedup: 'funnel_once:analysis_completed',
+                exampleProps: {
+                    source: 'form',
+                    input_type: 'video-url',
+                    interaction_id: 'analysis_...id...',
+                    score: 68,
+                    score_band: 'medium',
+                    platform: 'web',
+                    lang: 'ru',
+                    bucket_headline: 'a',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            analysis_failed: {
+                event: ANALYTICS_EVENTS.analysis_failed,
+                trigger: 'analyzeContent catch',
+                required: ['source', 'input_type', 'interaction_id'],
+                optional: ['error_code', 'error_message'],
+                kpi: 'Failure rate',
+                dedup: 'none'
+            },
+            quota_limit_hit: {
+                event: ANALYTICS_EVENTS.quota_limit_hit,
+                trigger: 'openStarsPaywallModal(analyze_limit)',
+                required: ['source', 'paywall_reason'],
+                optional: [],
+                kpi: 'Free quota exhaustion',
+                dedup: 'none'
+            },
+            paywall_shown: {
+                event: ANALYTICS_EVENTS.paywall_shown,
+                funnelCritical: true,
+                trigger: 'openStarsPaywallModal (each open)',
+                required: ['paywall_reason', 'paywall_variant', 'source_screen', 'interaction_id'],
+                optional: ['score', 'score_band', 'is_funnel_first_paywall', 'platform', 'lang'],
+                kpi: 'Paywall impressions by reason',
+                dedup: 'none (new interaction_id per impression)',
+                exampleProps: {
+                    paywall_reason: 'copy_full_report',
+                    paywall_variant: 'stars_modal',
+                    source_screen: 'results',
+                    interaction_id: 'paywall_...id...',
+                    score: 72,
+                    score_band: 'medium',
+                    is_funnel_first_paywall: true,
+                    platform: 'telegram-mini-app',
+                    lang: 'en',
+                    bucket_headline: 'c',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            paywall_cta_click: {
+                event: ANALYTICS_EVENTS.paywall_cta_click,
+                trigger: 'paywall-stars-btn click',
+                required: ['paywall_reason', 'paywall_variant', 'source_screen', 'interaction_id'],
+                optional: ['score_band'],
+                kpi: 'Paywall → checkout intent',
+                dedup: 'none'
+            },
+            stars_checkout_started: {
+                event: ANALYTICS_EVENTS.stars_checkout_started,
+                funnelCritical: true,
+                trigger: 'openStarsCheckout',
+                required: ['paywall_reason', 'paywall_variant', 'source_screen', 'interaction_id'],
+                optional: ['score', 'score_band', 'platform', 'lang'],
+                kpi: 'Checkout start',
+                dedup: 'none',
+                exampleProps: {
+                    paywall_reason: 'copy_full_report',
+                    paywall_variant: 'stars_modal',
+                    source_screen: 'results',
+                    interaction_id: 'paywall_...id...',
+                    score: 72,
+                    score_band: 'medium',
+                    platform: 'telegram-mini-app',
+                    lang: 'en',
+                    bucket_headline: 'b',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            stars_checkout_success: {
+                event: ANALYTICS_EVENTS.stars_checkout_success,
+                funnelCritical: true,
+                trigger: 'confirmUnlockAfterPayment when accessUnlocked',
+                required: ['paywall_reason', 'paywall_variant', 'source_screen'],
+                optional: ['interaction_id', 'score_band', 'platform', 'lang'],
+                kpi: 'Paid conversion',
+                dedup: 'funnel_once:stars_checkout_success',
+                exampleProps: {
+                    paywall_reason: 'copy_full_report',
+                    paywall_variant: 'stars_modal',
+                    source_screen: 'results',
+                    interaction_id: 'paywall_...id...',
+                    score_band: 'medium',
+                    platform: 'web',
+                    lang: 'en',
+                    bucket_headline: 'a',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            stars_checkout_failed: {
+                event: ANALYTICS_EVENTS.stars_checkout_failed,
+                trigger: 'invoice closed / cancelled',
+                required: ['paywall_reason', 'source_screen', 'interaction_id'],
+                optional: ['checkout_status', 'error_code'],
+                kpi: 'Checkout drop-off',
+                dedup: 'none'
+            },
+            premium_unlock_success: {
+                event: ANALYTICS_EVENTS.premium_unlock_success,
+                funnelCritical: true,
+                trigger: 'confirmUnlockAfterPayment when accessUnlocked',
+                required: ['paywall_reason', 'source_screen'],
+                optional: ['score_band', 'platform', 'lang'],
+                kpi: 'Premium activation',
+                dedup: 'funnel_once:premium_unlock_success',
+                exampleProps: {
+                    paywall_reason: 'copy_full_report',
+                    source_screen: 'results',
+                    score_band: 'medium',
+                    platform: 'web',
+                    lang: 'ru',
+                    bucket_headline: 'b',
+                    session_id: 'vs_...uuid...'
+                }
+            },
+            copy_full_report_click: { event: ANALYTICS_EVENTS.copy_full_report_click, trigger: 'copy-report-btn', required: ['source'], optional: ['score'], kpi: 'Export intent', dedup: 'none' },
+            copy_hook_click: { event: ANALYTICS_EVENTS.copy_hook_click, trigger: 'copy-hook-btn', required: ['source'], optional: ['score'], kpi: 'Asset copy', dedup: 'none' },
+            copy_caption_click: { event: ANALYTICS_EVENTS.copy_caption_click, trigger: 'copy-caption-btn', required: ['source'], optional: ['score'], kpi: 'Asset copy', dedup: 'none' },
+            copy_cta_click: { event: ANALYTICS_EVENTS.copy_cta_click, trigger: 'copy-cta-btn', required: ['source'], optional: ['score'], kpi: 'Asset copy', dedup: 'none' },
+            download_report_click: { event: ANALYTICS_EVENTS.download_report_click, trigger: 'download-report-btn', required: ['source'], optional: ['score'], kpi: 'Export intent', dedup: 'none' },
+            telegram_open_click: { event: ANALYTICS_EVENTS.telegram_open_click, trigger: 'open-telegram-cta', required: ['source'], optional: [], kpi: 'Telegram handoff', dedup: 'none' }
+        };
+
+        const TRACKING_PLAN_BY_EVENT = Object.fromEntries(
+            Object.values(TRACKING_PLAN).map(entry => [entry.event, entry])
+        );
+
+        /**
+         * PostHog dashboards / funnels — paste steps & breakdowns when building insights.
+         * All steps use exact event names from ANALYTICS_EVENTS (no $pageview / autocapture).
+         */
+        const POSTHOG_REPORTING_SPEC = {
+            project: 'Viral Score',
+            posthog: {
+                // PostHog “release reality”: capture-only (no autocapture/pageview/recording).
+                autocapture: false,
+                pageview: false,
+                sessionRecording: false,
+                adapter: 'window.posthog.capture only'
+            },
+            mainFunnel: {
+                id: 'main_plg_stars_funnel',
+                name: 'PLG → Stars funnel (headline_test buckets)',
+                kind: 'funnel',
+                segmentProperties: ['platform', 'lang', 'bucket_headline'],
+                steps: [
+                    {
+                        step: 1,
+                        event: 'landing_view',
+                        match: { source: 'landing' },
+                        label: 'Landing'
+                    },
+                    {
+                        step: 2,
+                        anyOfEvents: [
+                            { event: 'primary_cta_click', match: {} },
+                            { event: 'hero_cta_click', match: { source: 'hero' } }
+                        ],
+                        label: 'Any CTA click'
+                    },
+                    {
+                        step: 3,
+                        event: 'analysis_started',
+                        match: {},
+                        label: 'Analysis started'
+                    },
+                    {
+                        step: 4,
+                        event: 'analysis_completed',
+                        match: {},
+                        label: 'Analysis completed (dedup once/session)'
+                    },
+                    {
+                        step: 5,
+                        event: 'paywall_shown',
+                        match: { paywall_variant: 'stars_modal' },
+                        label: 'Paywall shown'
+                    },
+                    {
+                        step: 6,
+                        event: 'stars_checkout_started',
+                        match: { paywall_variant: 'stars_modal' },
+                        label: 'Stars checkout started'
+                    },
+                    {
+                        step: 7,
+                        event: 'stars_checkout_success',
+                        match: {},
+                        label: 'Stars checkout success (dedup once/session)'
+                    },
+                    {
+                        step: 8,
+                        event: 'premium_unlock_success',
+                        match: {},
+                        label: 'Premium unlock success (dedup once/session)'
+                    }
+                ],
+                expectedDedupBehavior: {
+                    primary_cta_click: 'max 1 per session_id (trackFunnelOnce: cta_engagement)',
+                    analysis_completed: 'max 1 per session_id (trackFunnelOnce: analysis_completed)',
+                    stars_checkout_success: 'max 1 per session_id (trackFunnelOnce: stars_checkout_success)',
+                    premium_unlock_success: 'max 1 per session_id (trackFunnelOnce: premium_unlock_success)'
+                },
+                howToBuildInPostHog: [
+                    'Build a Funnel with the exact step event names from this spec.',
+                    'For step 2 (Any CTA click), if PostHog cannot OR events inside a single step, create 2 funnels (primary_cta_click→analysis_started and hero_cta_click→analysis_started) and compare/aggregate externally.',
+                    'Add breakdown = bucket_headline for headline_test performance.'
+                ]
+            },
+            conversionInsightCards: [
+                {
+                    id: 'kpi_cta_to_analysis_started',
+                    title: 'CTA → analysis_started (deduped on code-side)',
+                    kind: 'funnel',
+                    steps: [
+                        {
+                            step: 1,
+                            anyOfEvents: [
+                                { event: 'primary_cta_click', match: {} },
+                                { event: 'hero_cta_click', match: { source: 'hero' } }
+                            ],
+                            label: 'Any CTA click'
+                        },
+                        { step: 2, event: 'analysis_started', match: {}, label: 'Analysis started' }
+                    ],
+                    suggestedBreakdowns: ['bucket_headline', 'platform', 'lang']
+                },
+                {
+                    id: 'kpi_analysis_started_to_completed',
+                    title: 'analysis_started → analysis_completed',
+                    kind: 'funnel',
+                    steps: [
+                        { step: 1, event: 'analysis_started', match: {}, label: 'Analysis started' },
+                        { step: 2, event: 'analysis_completed', match: {}, label: 'Analysis completed' }
+                    ],
+                    suggestedBreakdowns: ['bucket_headline', 'score_band', 'platform', 'lang']
+                },
+                {
+                    id: 'kpi_paywall_to_stars_checkout_success',
+                    title: 'paywall_shown → stars_checkout_success',
+                    kind: 'funnel',
+                    steps: [
+                        { step: 1, event: 'paywall_shown', match: { paywall_variant: 'stars_modal' }, label: 'Paywall shown' },
+                        { step: 2, event: 'stars_checkout_success', match: {}, label: 'Stars checkout success' }
+                    ],
+                    suggestedBreakdowns: ['paywall_reason', 'bucket_headline', 'score_band', 'platform', 'lang']
+                },
+                {
+                    id: 'kpi_premium_unlock_success_after_paywall',
+                    title: 'premium_unlock_success (after paywall)',
+                    kind: 'funnel',
+                    steps: [
+                        { step: 1, event: 'paywall_shown', match: { paywall_variant: 'stars_modal' }, label: 'Paywall shown' },
+                        { step: 2, event: 'premium_unlock_success', match: {}, label: 'Premium unlock success' }
+                    ],
+                    suggestedBreakdowns: ['bucket_headline', 'paywall_reason', 'score_band', 'platform', 'lang']
+                }
+            ],
+            breakdowns: [
+                { id: 'bd_bucket_headline', title: 'Breakdown by bucket_headline', property: 'bucket_headline' },
+                { id: 'bd_paywall_reason', title: 'Breakdown by paywall_reason', property: 'paywall_reason' },
+                { id: 'bd_score_band', title: 'Breakdown by score_band', property: 'score_band' },
+                { id: 'bd_platform', title: 'Breakdown by platform', property: 'platform' },
+                { id: 'bd_lang', title: 'Breakdown by lang', property: 'lang' }
+            ],
+            headline_test_guidance: {
+                experimentId: 'headline_test',
+                assignmentEvent: 'experiment_assigned',
+                assignmentMatch: { experiment: 'headline_test' },
+                bucketProperty: 'bucket_headline',
+                buckets: ['a', 'b', 'c'],
+                invariant: 'bucket_headline must match experiment_assigned.bucket AND be present on all funnel-critical events.',
+                whatToShowOnDashboard: [
+                    'Main funnel broken down by bucket_headline.',
+                    'CTA → analysis_started broken down by bucket_headline.',
+                    'analysis_started → analysis_completed broken down by bucket_headline.',
+                    'paywall_shown → stars_checkout_success broken down by bucket_headline.'
+                ]
+            },
+            liveEventsQa: {
+                criticalEvents: FUNNEL_CRITICAL_EVENTS,
+                requiredPropsByEvent: Object.fromEntries(
+                    FUNNEL_CRITICAL_EVENTS.map(ev => [ev, (TRACKING_PLAN_BY_EVENT[ev]?.required || [])])
+                ),
+                globalRequiredProps: ['platform', 'lang', 'session_id'],
+                paywallVariantInvariant: {
+                    paywall_shown: { paywall_variant: 'stars_modal' },
+                    stars_checkout_started: { paywall_variant: 'stars_modal' }
+                }
+            }
+        };
+
+        const ANALYTICS_BASE_PROP_KEYS = ['platform', 'lang', 'bucket_headline', 'is_premium', 'quota_remaining', 'session_id'];
+
+        const analyticsProviders = [];
+        const funnelOnceFlags = new Set();
+        const analyticsDebugLog = [];
+        const pendingPostHogEvents = [];
+        let analyticsSessionId = '';
+        let growthLayerInitialized = false;
+        let experimentsAssignedTracked = false;
+        let currentAnalysisInteractionId = '';
+        let currentPaywallInteractionId = '';
+        let lastPaywallReason = 'copy_full_report';
+        let lastPaywallSourceScreen = 'results';
+        let postHogInitStarted = false;
+        let postHogReady = false;
+        let analyticsDebugForced = false;
+
+        const ANALYTICS_DEBUG_STORAGE_KEY = 'vs_analytics_debug';
+
+        function isAnalyticsDebugEnabled() {
+            if (analyticsDebugForced || window.VIRAL_SCORE_ANALYTICS?.debug === true) return true;
+            try {
+                if (new URLSearchParams(window.location.search).get('analytics_debug') === '1') return true;
+                if (safeStorage.getItem(ANALYTICS_DEBUG_STORAGE_KEY) === '1') return true;
+            } catch { /* ignore */ }
+            return false;
+        }
+
+        function enableAnalyticsDebug(persist = true) {
+            analyticsDebugForced = true;
+            if (persist) safeStorage.setItem(ANALYTICS_DEBUG_STORAGE_KEY, '1');
+            const badge = document.getElementById('analytics-debug-badge');
+            const panel = document.getElementById('analytics-debug-panel');
+            if (badge) badge.classList.add('visible');
+            if (panel) panel.classList.add('visible');
+            console.info('[analytics] debug enabled — ViralScoreAnalytics.runQaChecklist()');
+        }
+
+        function disableAnalyticsDebug() {
+            analyticsDebugForced = false;
+            safeStorage.removeItem(ANALYTICS_DEBUG_STORAGE_KEY);
+            const badge = document.getElementById('analytics-debug-badge');
+            const panel = document.getElementById('analytics-debug-panel');
+            if (badge) badge.classList.remove('visible');
+            if (panel) panel.classList.remove('visible');
+        }
+
+        function validateEventAgainstPlan(eventName, props) {
+            const plan = TRACKING_PLAN_BY_EVENT[eventName];
+            if (!plan) return [];
+            const missing = (plan.required || []).filter(key => props[key] === undefined || props[key] === null || props[key] === '');
+            return missing;
+        }
+
+        function runAnalyticsQaChecklist() {
+            const preflight = ANALYTICS_QA_CHECKLIST.preflight.map(item => ({
+                id: item.id,
+                label: item.label,
+                pass: Boolean(item.check())
+            }));
+            const allPass = preflight.every(r => r.pass);
+            const report = {
+                ok: allPass,
+                preflight,
+                funnelCriticalEvents: [...FUNNEL_CRITICAL_EVENTS],
+                activeExperiments: [...ACTIVE_EXPERIMENTS],
+                posthog: readPostHogConfig(),
+                postHogReady,
+                liveSessionSteps: ANALYTICS_QA_CHECKLIST.liveSession
+            };
+            console.table(preflight);
+            console.info('[analytics:qa]', report);
+            return report;
+        }
+
+        function getExpectedCriticalDedupBehavior() {
+            const out = {};
+            FUNNEL_CRITICAL_EVENTS.forEach(ev => {
+                const plan = TRACKING_PLAN_BY_EVENT[ev];
+                const isFunnelOnce = Boolean(plan?.dedup && String(plan.dedup).startsWith('funnel_once:'));
+                out[ev] = {
+                    dedup: plan?.dedup || 'none',
+                    scope: 'per session_id (page-load identity)',
+                    expectMaxPerSession: isFunnelOnce ? 1 : Infinity,
+                    requiredProps: plan?.required || []
+                };
+            });
+            return out;
+        }
+
+        /**
+         * Debug-only validation helper.
+         * Use it in QA: ?analytics_debug=1, then run
+         * `ViralScoreAnalytics.validateCriticalEventsFromDebugLog()`.
+         */
+        function validateCriticalEventsFromDebugLog() {
+            const globalRequired = ['platform', 'lang', 'session_id'];
+            const dedup = getExpectedCriticalDedupBehavior();
+            const countsByEvent = {};
+            const uniqueInteractionIdsByEvent = {};
+            const issues = [];
+
+            FUNNEL_CRITICAL_EVENTS.forEach(ev => {
+                countsByEvent[ev] = 0;
+                uniqueInteractionIdsByEvent[ev] = new Set();
+            });
+
+            analyticsDebugLog.forEach(entry => {
+                if (!FUNNEL_CRITICAL_EVENTS.includes(entry.event)) return;
+                const plan = TRACKING_PLAN_BY_EVENT[entry.event];
+                const props = entry.props || {};
+                countsByEvent[entry.event] = (countsByEvent[entry.event] || 0) + 1;
+
+                globalRequired.forEach(k => {
+                    if (props[k] === undefined || props[k] === null || props[k] === '') {
+                        issues.push({ event: entry.event, type: 'missing_global_prop', prop: k, payload: props });
+                    }
+                });
+
+                (plan?.required || []).forEach(k => {
+                    if (props[k] === undefined || props[k] === null || props[k] === '') {
+                        issues.push({ event: entry.event, type: 'missing_required_prop', prop: k, payload: props });
+                    }
+                });
+
+                if (props.interaction_id) {
+                    uniqueInteractionIdsByEvent[entry.event].add(props.interaction_id);
+                }
+            });
+
+            // Dedup validation for funnel_once events (max 1 per page-load/session_id in a single debug run).
+            FUNNEL_CRITICAL_EVENTS.forEach(ev => {
+                const expectedMax = dedup[ev]?.expectMaxPerSession ?? Infinity;
+                if (Number.isFinite(expectedMax) && countsByEvent[ev] > expectedMax) {
+                    issues.push({
+                        event: ev,
+                        type: 'dedup_violation',
+                        dedup: dedup[ev]?.dedup,
+                        expectedMaxPerSession: expectedMax,
+                        actualCount: countsByEvent[ev]
+                    });
+                }
+            });
+
+            // Paywall critical event should carry interaction_id and should not repeat identical interaction_id.
+            const paywallEv = ANALYTICS_EVENTS.paywall_shown;
+            const paywallCount = countsByEvent[paywallEv] || 0;
+            const paywallUnique = uniqueInteractionIdsByEvent[paywallEv]?.size || 0;
+            if (paywallUnique !== paywallCount && paywallCount > 0) {
+                issues.push({
+                    event: paywallEv,
+                    type: 'interaction_id_dup_or_missing',
+                    paywallCount,
+                    uniqueInteractionIds: paywallUnique
+                });
+            }
+
+            const ok = issues.length === 0;
+            return {
+                ok,
+                session_id: analyticsSessionId,
+                countsByEvent,
+                uniqueInteractionIdsByEvent: Object.fromEntries(
+                    Object.entries(uniqueInteractionIdsByEvent).map(([ev, set]) => [ev, set.size])
+                ),
+                issues
+            };
+        }
+
+        function makeAnalyticsSessionId() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+            return `vs_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        }
+
+        function makeInteractionId(prefix) {
+            const tail = typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID().slice(0, 8)
+                : Math.random().toString(36).slice(2, 10);
+            return `${prefix}_${tail}`;
+        }
+
+        function sanitizeAnalyticsProps(props) {
+            const out = {};
+            Object.entries(props || {}).forEach(([key, value]) => {
+                if (value === undefined || value === null || value === '') return;
+                out[key] = value;
+            });
+            return out;
+        }
+
+        function registerAnalyticsProvider(handler) {
+            if (typeof handler === 'function') analyticsProviders.push(handler);
+        }
+
+        function readPostHogConfig() {
+            const globalCfg = window.VIRAL_SCORE_ANALYTICS || {};
+            const keyMeta = document.querySelector('meta[name="viral-score-posthog-key"]');
+            const hostMeta = document.querySelector('meta[name="viral-score-posthog-host"]');
+            return {
+                apiKey: (globalCfg.posthogKey || keyMeta?.content || '').trim(),
+                apiHost: (globalCfg.posthogHost || hostMeta?.content || 'https://us.i.posthog.com').trim()
+            };
+        }
+
+        function flushPostHogIdentify() {
+            const ph = window.posthog;
+            if (!ph || !analyticsSessionId) return;
+            if (typeof ph.identify === 'function') ph.identify(analyticsSessionId);
+        }
+
+        function flushPendingPostHogEvents() {
+            const ph = window.posthog;
+            if (!ph || typeof ph.capture !== 'function') return;
+            while (pendingPostHogEvents.length) {
+                const payload = pendingPostHogEvents.shift();
+                const { event, ts, ...rest } = payload;
+                ph.capture(event, sanitizeAnalyticsProps(rest));
+            }
+        }
+
+        function createPostHogProviderAdapter() {
+            return function posthogAnalyticsProvider(payload) {
+                const ph = window.posthog;
+                if (!ph || typeof ph.capture !== 'function') {
+                    pendingPostHogEvents.push(payload);
+                    if (pendingPostHogEvents.length > 48) pendingPostHogEvents.shift();
+                    return;
+                }
+                const { event, ts, ...rest } = payload;
+                ph.capture(event, sanitizeAnalyticsProps(rest));
+            };
+        }
+
+        function loadPostHogSdk(apiKey, apiHost) {
+            return new Promise(resolve => {
+                if (!apiKey) {
+                    resolve(false);
+                    return;
+                }
+                if (window.posthog && typeof window.posthog.capture === 'function') {
+                    postHogReady = true;
+                    flushPostHogIdentify();
+                    flushPendingPostHogEvents();
+                    resolve(true);
+                    return;
+                }
+                const host = apiHost.replace(/\/$/, '');
+                const script = document.createElement('script');
+                script.async = true;
+                script.src = `${host}/static/array.js`;
+                script.onload = () => {
+                    try {
+                        window.posthog.init(apiKey, {
+                            api_host: host,
+                            ...POSTHOG_CLIENT_CONFIG,
+                            persistence: 'localStorage'
+                        });
+                        postHogReady = true;
+                        flushPostHogIdentify();
+                        flushPendingPostHogEvents();
+                        resolve(true);
+                    } catch (err) {
+                        console.warn('[analytics] PostHog init failed', err);
+                        resolve(false);
+                    }
+                };
+                script.onerror = () => {
+                    console.warn('[analytics] PostHog SDK failed to load');
+                    resolve(false);
+                };
+                document.head.appendChild(script);
+            });
+        }
+
+        function initPostHog() {
+            if (postHogInitStarted) return;
+            postHogInitStarted = true;
+            const { apiKey, apiHost } = readPostHogConfig();
+            registerAnalyticsProvider(createPostHogProviderAdapter());
+            if (!apiKey) return;
+            loadPostHogSdk(apiKey, apiHost).catch(err => console.warn('[analytics] PostHog', err));
+        }
+
+        function formatDebugProps(props) {
+            const keys = Object.keys(props || {}).slice(0, 8);
+            if (!keys.length) return '';
+            return keys.map(k => `${k}=${String(props[k]).slice(0, 24)}`).join(' ');
+        }
+
+        function renderAnalyticsDebug(payload, meta = {}) {
+            if (!isAnalyticsDebugEnabled()) return;
+            const props = sanitizeAnalyticsProps({ ...payload, event: undefined, ts: undefined });
+            const missing = validateEventAgainstPlan(payload.event, props);
+            const entry = {
+                event: payload.event,
+                ts: payload.ts,
+                dedup: meta.dedup || 'sent',
+                location: meta.location || '',
+                props,
+                missing
+            };
+            analyticsDebugLog.unshift(entry);
+            // For launch QA we want enough history to validate dedup behavior.
+            if (analyticsDebugLog.length > 120) analyticsDebugLog.length = 120;
+            const panel = document.getElementById('analytics-debug-panel');
+            const badge = document.getElementById('analytics-debug-badge');
+            if (badge) badge.classList.add('visible');
+            if (panel) {
+                panel.classList.add('visible');
+                panel.innerHTML = analyticsDebugLog.map(item => {
+                    const warn = item.missing?.length ? ` <span class="analytics-debug-warn">missing:${item.missing.join(',')}</span>` : '';
+                    const propLine = formatDebugProps(item.props);
+                    return `<div><strong>${item.event}</strong> · ${new Date(item.ts).toISOString().slice(11, 19)} · ${item.dedup}${item.location ? ` · ${item.location}` : ''}${warn}${propLine ? `<br><span class="analytics-debug-props">${propLine}</span>` : ''}</div>`;
+                }).join('');
+            }
+            console.info('[analytics:debug]', entry);
+        }
+
+        function setupAnalyticsDebugUi() {
+            if (!isAnalyticsDebugEnabled()) return;
+            try {
+                if (new URLSearchParams(window.location.search).get('analytics_debug') === '1') {
+                    safeStorage.setItem(ANALYTICS_DEBUG_STORAGE_KEY, '1');
+                }
+            } catch { /* ignore */ }
+            enableAnalyticsDebug(false);
+            const badge = document.getElementById('analytics-debug-badge');
+            const panel = document.getElementById('analytics-debug-panel');
+            if (badge) {
+                badge.textContent = 'analytics debug · tap';
+                badge.style.pointerEvents = 'auto';
+                badge.style.cursor = 'pointer';
+                badge.addEventListener('click', () => {
+                    if (panel) panel.classList.toggle('expanded');
+                });
+            }
+        }
+
+        function getPlatformContext() {
+            return isTelegramWebApp() ? 'telegram-mini-app' : 'web';
+        }
+
+        function getInputTypeForAnalytics() {
+            const map = { text: 'text', 'video-url': 'link', 'video-file': 'file' };
+            return map[state?.currentSourceType] || 'text';
+        }
+
+        function getQuotaRemaining() {
+            if (!state || state.accessUnlocked || state.freeLimit <= 0) return undefined;
+            return Math.max(0, state.freeLimit - state.usageCount);
+        }
+
+        function getScoreBand(score) {
+            const n = Number(score);
+            if (!Number.isFinite(n)) return undefined;
+            if (n < 50) return 'low';
+            if (n < 75) return 'medium';
+            return 'high';
+        }
+
+        function mapPaywallReason(reason) {
+            const canonical = ['copy_hook', 'copy_caption', 'copy_cta', 'copy_full_report', 'download', 'quota_exceeded', 'premium_teaser'];
+            if (canonical.includes(reason)) return reason;
+            const map = {
+                copy_assets: 'copy_hook',
+                copy_report: 'copy_full_report',
+                download_report: 'download',
+                analyze_limit: 'quota_exceeded',
+                export: 'copy_full_report'
+            };
+            return map[reason] || reason;
+        }
+
+        function getExperimentBucketProps() {
+            const active = getActiveExperimentState();
+            const props = {};
+            if (active.headline_test) props.bucket_headline = active.headline_test;
+            return props;
+        }
+
+        function getAnalyticsBaseProps(extra = {}) {
+            return sanitizeAnalyticsProps({
+                platform: getPlatformContext(),
+                lang: state?.lang || 'en',
+                session_id: analyticsSessionId,
+                is_premium: Boolean(state?.accessUnlocked),
+                quota_remaining: getQuotaRemaining(),
+                ...getExperimentBucketProps(),
+                ...extra
+            });
+        }
+
+        function trackEvent(name, props = {}, meta = {}) {
+            const payload = sanitizeAnalyticsProps({
+                event: name,
+                ...getAnalyticsBaseProps(props),
+                ts: Date.now()
+            });
+            const missing = validateEventAgainstPlan(name, payload);
+            if (missing.length && isAnalyticsDebugEnabled()) {
+                console.warn('[analytics] missing required props', name, missing);
+            }
+            if (!isAnalyticsDebugEnabled() && typeof console !== 'undefined' && console.debug) {
+                console.debug('[analytics]', payload);
+            }
+            renderAnalyticsDebug(payload, meta);
+            analyticsProviders.forEach(provider => {
+                try { provider(payload); } catch (err) { console.warn('[analytics] provider error', err); }
+            });
+        }
+
+        function trackFunnelOnce(flagKey, eventName, props = {}, location = '') {
+            if (funnelOnceFlags.has(flagKey)) {
+                if (isAnalyticsDebugEnabled()) renderAnalyticsDebug({ event: eventName, ts: Date.now() }, { dedup: 'skipped_funnel_once', location });
+                return false;
+            }
+            funnelOnceFlags.add(flagKey);
+            trackEvent(eventName, props, { location, dedup: 'funnel_once' });
+            return true;
+        }
+
+        function trackCtaEngagement(source) {
+            if (source === 'hero') {
+                trackEvent(ANALYTICS_EVENTS.hero_cta_click, { source: 'hero' }, { location: 'handlePrimaryCtaClick' });
+            }
+            trackFunnelOnce(FUNNEL_ONCE_KEYS.cta_engagement, ANALYTICS_EVENTS.primary_cta_click, { source }, 'trackCtaEngagement');
+        }
+
+        function trackPaywallShown(reason, sourceScreen) {
+            const mapped = mapPaywallReason(reason);
+            lastPaywallReason = mapped;
+            lastPaywallSourceScreen = sourceScreen;
+            currentPaywallInteractionId = makeInteractionId('paywall');
+            const score = state.lastAnalysisResult?.viral_score;
+            const isFirst = !funnelOnceFlags.has('paywall_impression');
+            if (isFirst) funnelOnceFlags.add('paywall_impression');
+            trackEvent(ANALYTICS_EVENTS.paywall_shown, {
+                paywall_variant: 'stars_modal',
+                paywall_reason: mapped,
+                source_screen: sourceScreen,
+                interaction_id: currentPaywallInteractionId,
+                score: Number.isFinite(Number(score)) ? Number(score) : undefined,
+                score_band: getScoreBand(score),
+                is_funnel_first_paywall: isFirst
+            }, { location: 'openStarsPaywallModal' });
+        }
+
+        function extractErrorCode(err) {
+            const msg = String(err?.message || err || '').toLowerCase();
+            if (/timeout|timed out/i.test(msg)) return 'timeout';
+            if (/fetch|network/i.test(msg)) return 'network';
+            if (/quota|limit/i.test(msg)) return 'quota';
+            if (/max_tokens|token/i.test(msg)) return 'max_tokens';
+            return 'unknown';
+        }
+
+        /* ===== A/B experiments (production: headline_test only; framework stays reusable) ===== */
+        const ACTIVE_EXPERIMENTS = ['headline_test'];
+
+        const EXPERIMENT_REGISTRY = {
+            headline_test: {
+                param: 'exp_headline',
+                variants: ['a', 'b', 'c'],
+                enabled: true
+            },
+            cta_copy_test: {
+                param: 'exp_cta',
+                variants: ['a', 'b', 'c'],
+                enabled: false
+            },
+            preview_card_test: {
+                param: 'exp_preview',
+                variants: ['a', 'b', 'c'],
+                enabled: false
+            }
+        };
+
+        /** Runnable preflight + human steps for PostHog Live Events QA (defined after experiment registry). */
+        const ANALYTICS_QA_CHECKLIST = {
+            preflight: [
+                { id: 'posthog_key', check: () => Boolean(readPostHogConfig().apiKey), label: 'PostHog API key configured' },
+                {
+                    id: 'posthog_flags',
+                    check: () => !POSTHOG_CLIENT_CONFIG.autocapture && !POSTHOG_CLIENT_CONFIG.capture_pageview && POSTHOG_CLIENT_CONFIG.disable_session_recording,
+                    label: 'autocapture/pageview/session-recording disabled in init'
+                },
+                { id: 'funnel_events', check: () => FUNNEL_CRITICAL_EVENTS.every(ev => TRACKING_PLAN_BY_EVENT[ev]), label: 'All funnel-critical events in TRACKING_PLAN' },
+                { id: 'single_experiment', check: () => ACTIVE_EXPERIMENTS.length === 1 && ACTIVE_EXPERIMENTS[0] === 'headline_test', label: 'Only headline_test active' },
+                { id: 'cta_experiments_off', check: () => !EXPERIMENT_REGISTRY.cta_copy_test.enabled && !EXPERIMENT_REGISTRY.preview_card_test.enabled, label: 'cta_copy_test & preview_card_test disabled' }
+            ],
+            expectedCriticalEvents: [
+                { event: 'landing_view', dedup: 'funnel_once:landing_view', expectMaxPerSession: 1, requiredProps: ['source'] },
+                { event: 'experiment_assigned', dedup: 'session_once:experimentsAssignedTracked', expectMaxPerSession: 1, requiredProps: ['experiment', 'bucket'] },
+                { event: 'hero_cta_click', dedup: 'none', expectMaxPerSession: 'any', requiredProps: ['source'] },
+                { event: 'primary_cta_click', dedup: 'funnel_once:cta_engagement', expectMaxPerSession: 1, requiredProps: ['source'] },
+                { event: 'analysis_started', dedup: 'none (one per analyze run)', expectMaxPerSession: 'any', requiredProps: ['source', 'input_type', 'interaction_id'] },
+                { event: 'analysis_completed', dedup: 'funnel_once:analysis_completed', expectMaxPerSession: 1, requiredProps: ['source', 'input_type', 'interaction_id'] },
+                { event: 'paywall_shown', dedup: 'none (new interaction_id per open)', expectMaxPerSession: 'any', requiredProps: ['paywall_reason', 'paywall_variant', 'source_screen', 'interaction_id'] },
+                { event: 'stars_checkout_started', dedup: 'none', expectMaxPerSession: 'any', requiredProps: ['paywall_reason', 'paywall_variant', 'source_screen', 'interaction_id'] },
+                { event: 'stars_checkout_success', dedup: 'funnel_once:stars_checkout_success', expectMaxPerSession: 1, requiredProps: ['paywall_reason', 'paywall_variant', 'source_screen'] },
+                { event: 'premium_unlock_success', dedup: 'funnel_once:premium_unlock_success', expectMaxPerSession: 1, requiredProps: ['paywall_reason', 'source_screen'] }
+            ],
+            liveSession: [
+                'Open app with ?analytics_debug=1 — debug panel shows events + props',
+                'PostHog → Live events: landing_view, experiment_assigned (experiment=headline_test)',
+                'Tap hero CTA → hero_cta_click + primary_cta_click (primary only once)',
+                'Run analysis → analysis_started then analysis_completed',
+                'Trigger paywall → paywall_shown with paywall_reason',
+                'Start Stars checkout → stars_checkout_started',
+                'Complete payment (staging) → stars_checkout_success + premium_unlock_success (each once)',
+                'Reload page → no second landing_view / experiment_assigned',
+                'Second analysis → analysis_started again, no second analysis_completed',
+                'Debug validation: run ViralScoreAnalytics.validateCriticalEventsFromDebugLog() and expect ok===true'
+            ],
+            passFailCriteria: {
+                preflight: 'ViralScoreAnalytics.runQaChecklist().ok === true',
+                debugDedupAndProps: 'ViralScoreAnalytics.validateCriticalEventsFromDebugLog().ok === true',
+                postHogLiveEvents: [
+                    'In PostHog Live Events, filter to the last 15-30 min and the funnel critical events.',
+                    'On 3-5 sampled sessions: for funnel_once events counts per session_id must be <= 1.',
+                    'For paywall_shown and stars_checkout_started: paywall_variant must be "stars_modal" and interaction_id must be present.',
+                    'All critical events must include platform, lang, session_id properties.'
+                ],
+                headlineSpecific: [
+                    'Only headline_test is assigned: experiment_assigned.event should have experiment=headline_test and buckets a/b/c.',
+                    'bucket_headline must be present on downstream critical events (from analysis_started onward).'
+                ]
+            }
+        };
+
+        const EXPERIMENT_HEADLINE_COPY = {
+            en: {
+                a: 'Know if your content can go viral before you post',
+                b: 'Check your viral potential before you publish',
+                c: 'See if your content is ready to go viral'
+            },
+            ru: {
+                a: 'Узнай, зайдёт ли контент в viral, до публикации',
+                b: 'Проверь viral-потенциал до публикации',
+                c: 'Готов ли твой контент к viral-росту'
+            }
+        };
+
+        let experimentAssignmentsCache = null;
+
+        function hashExperimentBucket(experimentId, variants) {
+            const seed = `${analyticsSessionId}:${experimentId}`;
+            let hash = 0;
+            for (let i = 0; i < seed.length; i += 1) {
+                hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+                hash |= 0;
+            }
+            return variants[Math.abs(hash) % variants.length];
+        }
+
+        function readExperimentOverride(experimentId) {
+            try {
+                const param = EXPERIMENT_REGISTRY[experimentId]?.param;
+                if (!param) return null;
+                const raw = new URLSearchParams(window.location.search).get(param);
+                if (!raw) return null;
+                const bucket = String(raw).toLowerCase();
+                return EXPERIMENT_REGISTRY[experimentId].variants.includes(bucket) ? bucket : null;
+            } catch {
+                return null;
+            }
+        }
+
+        function assignExperiment(experimentId) {
+            const cfg = EXPERIMENT_REGISTRY[experimentId];
+            if (!cfg?.enabled) return null;
+            const override = readExperimentOverride(experimentId);
+            if (override) return override;
+            return hashExperimentBucket(experimentId, cfg.variants);
+        }
+
+        function getExperimentAssignments() {
+            if (!experimentAssignmentsCache) {
+                experimentAssignmentsCache = {};
+                Object.keys(EXPERIMENT_REGISTRY).forEach(id => {
+                    experimentAssignmentsCache[id] = assignExperiment(id);
+                });
+            }
+            return experimentAssignmentsCache;
+        }
+
+        function getActiveExperimentState() {
+            const all = getExperimentAssignments();
+            const active = {};
+            ACTIVE_EXPERIMENTS.forEach(id => {
+                if (all[id]) active[id] = all[id];
+            });
+            return active;
+        }
+
+        function trackExperimentAssignmentsOnce() {
+            if (experimentsAssignedTracked) return;
+            experimentsAssignedTracked = true;
+            const active = getActiveExperimentState();
+            Object.entries(active).forEach(([experiment, bucket]) => {
+                trackEvent(ANALYTICS_EVENTS.experiment_assigned, {
+                    experiment,
+                    bucket,
+                    source: readExperimentOverride(experiment) ? 'url_override' : 'hash'
+                }, { location: 'trackExperimentAssignmentsOnce' });
+            });
+        }
+
+        function applyExperimentVariants() {
+            const active = getActiveExperimentState();
+            const lang = state?.lang === 'ru' ? 'ru' : 'en';
+
+            if (plgHeadlineEl && active.headline_test) {
+                plgHeadlineEl.textContent = EXPERIMENT_HEADLINE_COPY[lang][active.headline_test] || EXPERIMENT_HEADLINE_COPY.en.a;
+            }
+
+            document.querySelectorAll('[data-i18n="primaryCta"]').forEach(el => { el.textContent = t('primaryCta'); });
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
+
+            if (resultPreviewCard) {
+                resultPreviewCard.dataset.previewVariant = 'a';
+                const insights = document.getElementById('preview-insights');
+                if (insights) insights.style.display = '';
+            }
+        }
+
+        function initGrowthLayer() {
+            if (growthLayerInitialized) return;
+            growthLayerInitialized = true;
+            analyticsSessionId = makeAnalyticsSessionId();
+            setupAnalyticsDebugUi();
+            initPostHog();
+            flushPostHogIdentify();
+            trackExperimentAssignmentsOnce();
+            applyExperimentVariants();
+            trackFunnelOnce(FUNNEL_ONCE_KEYS.landing_view, ANALYTICS_EVENTS.landing_view, {
+                source: 'landing'
+            }, 'initGrowthLayer');
+        }
+
+        window.ViralScoreAnalytics = {
+            events: ANALYTICS_EVENTS,
+            funnelCriticalEvents: FUNNEL_CRITICAL_EVENTS,
+            trackingPlan: TRACKING_PLAN,
+            reportingSpec: POSTHOG_REPORTING_SPEC,
+            qaChecklist: ANALYTICS_QA_CHECKLIST,
+            runQaChecklist: runAnalyticsQaChecklist,
+            validateCriticalEventsFromDebugLog: validateCriticalEventsFromDebugLog,
+            getExpectedCriticalDedupBehavior: getExpectedCriticalDedupBehavior,
+            getSessionId: () => analyticsSessionId,
+            enableDebug: enableAnalyticsDebug,
+            disableDebug: disableAnalyticsDebug,
+            isDebugEnabled: isAnalyticsDebugEnabled,
+            getDebugLog: () => [...analyticsDebugLog],
+            getPendingPostHogCount: () => pendingPostHogEvents.length
+        };
+
+        /* ===== Premium blur teaser (result screen) ===== */
+        function buildPremiumInsightCards(data, meta = {}) {
+            const platform = meta.platform || state.currentPlatform || 'Instagram';
+            const hook = data.improved_hook || '';
+            const caption = data.improved_caption || '';
+            const cta = data.improved_cta || '';
+            const altHook = hook
+                ? `${hook}\n\n• ${state.lang === 'ru' ? 'Вопрос в первом кадре' : 'Question-led cold open'}\n• ${state.lang === 'ru' ? 'Контраст «до/после»' : 'Before/after contrast hook'}`
+                : (state.lang === 'ru' ? 'Продвинутые варианты хука появятся после анализа.' : 'Advanced hook variants appear after analysis.');
+            const ctaPack = cta
+                ? `${cta}\n\n1. ${state.lang === 'ru' ? 'Мягкий CTA (save)' : 'Soft CTA (save)'}\n2. ${state.lang === 'ru' ? 'Прямой CTA (comment)' : 'Direct CTA (comment)'}\n3. ${state.lang === 'ru' ? 'DM-CTA для лидов' : 'DM CTA for leads'}`
+                : (state.lang === 'ru' ? 'Набор CTA появится после анализа.' : 'CTA pack appears after analysis.');
+            const angle = caption
+                ? `${state.lang === 'ru' ? 'Угол' : 'Angle'}: ${state.lang === 'ru' ? '«день из жизни» + доказательство результата' : '"day in the life" + proof of outcome'}\n${caption.slice(0, 160)}${caption.length > 160 ? '…' : ''}`
+                : (data.shareability_insight || (state.lang === 'ru' ? 'Угол конкурентов по нише.' : 'Competitor-style angle for your niche.'));
+            const platformTip = data.platform_fit_insight
+                ? `${platform}: ${data.platform_fit_insight}\n${state.lang === 'ru' ? 'Формат' : 'Format'}: ${state.lang === 'ru' ? '9:16, субтитры, hook ≤2с' : '9:16, captions, hook ≤2s'}`
+                : `${platform}: ${state.lang === 'ru' ? 'Советы под алгоритм платформы после unlock.' : 'Platform algorithm tips after unlock.'}`;
+
+            return [
+                { id: 'hook_rewrite', titleKey: 'premiumHookTitle', body: altHook },
+                { id: 'cta_pack', titleKey: 'premiumCtaTitle', body: ctaPack },
+                { id: 'angle', titleKey: 'premiumAngleTitle', body: angle },
+                { id: 'platform_opt', titleKey: 'premiumPlatformTitle', body: platformTip }
+            ];
+        }
+
+        function openPaywallFromTeaser() {
+            lastPaywallSourceScreen = 'results';
+            openStarsPaywallModal('premium_teaser');
+        }
+
+        function renderPremiumInsightsTeaser(data, meta = {}) {
+            if (!premiumInsightsGrid || !premiumInsightsSection) return;
+            const cards = buildPremiumInsightCards(data, meta);
+            const gated = shouldGatePremiumExport();
+            premiumInsightsGrid.innerHTML = '';
+            cards.slice(0, 2).forEach((card, index) => {
+                const el = document.createElement('div');
+                el.className = `premium-teaser-card${gated ? ' is-gated' : ''}`;
+                el.dataset.premiumCard = card.id;
+                el.style.animationDelay = `${1150 + index * 80}ms`;
+                el.innerHTML = `
+                    <div class="premium-teaser-card-inner">
+                        <div class="premium-teaser-card-title">${t(card.titleKey)}</div>
+                        <div class="premium-teaser-card-body"></div>
+                    </div>
+                    <div class="premium-teaser-overlay">
+                        <p data-i18n="premiumUnlockOverlay">${t('premiumUnlockOverlay')}</p>
+                        <button type="button" class="primary-btn primary-cta premium-teaser-unlock-btn">${t('premiumUnlockCta')}</button>
+                    </div>
+                `;
+                el.querySelector('.premium-teaser-card-body').textContent = card.body;
+                const unlockBtn = el.querySelector('.premium-teaser-unlock-btn');
+                if (unlockBtn) {
+                    unlockBtn.addEventListener('click', event => {
+                        event.stopPropagation();
+                        openPaywallFromTeaser();
+                    });
+                }
+                premiumInsightsGrid.appendChild(el);
+            });
+            premiumInsightsSection.classList.remove('hidden');
+        }
+
+        function syncPremiumInsightsTeaser() {
+            if (!premiumInsightsGrid) return;
+            const gated = shouldGatePremiumExport();
+            premiumInsightsGrid.querySelectorAll('.premium-teaser-card').forEach(card => {
+                card.classList.toggle('is-gated', gated);
+            });
+        }
+
         const state = {
             apiKey: safeStorage.getItem(STORAGE_KEYS.apiKey) || '',
             backendUrl: (() => {
@@ -2363,7 +4266,7 @@
                 contextInput: safeStorage.getItem(STORAGE_KEYS.draftContextInput) || ''
             },
             currentPlatform: safeStorage.getItem(STORAGE_KEYS.lastPlatform) || 'Instagram',
-            currentSourceType: safeStorage.getItem(STORAGE_KEYS.lastSource) || 'video-file',
+            currentSourceType: safeStorage.getItem(STORAGE_KEYS.lastSource) || 'text',
             currentMode: safeStorage.getItem(STORAGE_KEYS.lastMode) || 'pro',
             selectedVideoFile: null,
             selectedVideoUrl: '',
@@ -2462,6 +4365,8 @@
             syncPaymentButtons();
             updateQuotaLabel();
             renderLaunchChecklist();
+            syncPlgChrome();
+            applyExperimentVariants();
         }
 
         function saveDraft() {
@@ -2790,6 +4695,14 @@
             if (status === 'cancelled' || status === 'failed') {
                 starsCheckoutAwaitingUnlock = false;
                 clearStarsUnlockPoll();
+                trackEvent(ANALYTICS_EVENTS.stars_checkout_failed, {
+                    paywall_variant: 'stars_modal',
+                    paywall_reason: lastPaywallReason,
+                    source_screen: lastPaywallSourceScreen,
+                    interaction_id: currentPaywallInteractionId,
+                    checkout_status: status,
+                    error_code: status === 'failed' ? 'checkout_failed' : 'checkout_cancelled'
+                }, { location: 'handleStarsInvoiceClosed' });
             }
         }
 
@@ -3049,7 +4962,7 @@
                 return;
             }
             analyzeBtn.disabled = false;
-            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
         }
 
         async function cleanupTransientBlobUrl(blobUrl) {
@@ -4145,7 +6058,7 @@
             clearInterval(state.loadingInterval);
             state.loadingInterval = null;
             analyzeBtn.disabled = false;
-            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
         }
 
         function openSettings() {
@@ -4164,9 +6077,8 @@
         }
 
         function closeSettings() {
-            if (canAnalyze()) {
-                settingsModal.classList.remove('active');
-            } else {
+            settingsModal.classList.remove('active');
+            if (!canAnalyze()) {
                 mainError.textContent = t('backendRequired');
                 mainError.style.display = 'block';
             }
@@ -4215,16 +6127,130 @@
             refreshMonetizationHints();
         }
 
+        /** PLG: quota microcopy under hero — not a paywall on the main screen. */
         function updateQuotaLabel() {
-            if (!quotaLabel) return;
+            if (!quotaHintEl) return;
             if (state.accessUnlocked) {
-                quotaLabel.textContent = t('paidWithStars');
+                quotaHintEl.textContent = t('quotaHintUnlimited');
+                quotaHintEl.classList.remove('hidden');
                 return;
             }
             if (state.freeLimit > 0) {
-                quotaLabel.textContent = t('quotaLabelLimit', state.usageCount, state.freeLimit);
+                const left = Math.max(0, state.freeLimit - state.usageCount);
+                quotaHintEl.textContent = t('quotaHintFree', left, state.freeLimit);
+                quotaHintEl.classList.remove('hidden');
             } else {
-                quotaLabel.textContent = t('quotaLabel', state.usageCount);
+                quotaHintEl.classList.add('hidden');
+            }
+        }
+
+        function hasPremiumAccess() {
+            return Boolean(state.accessUnlocked);
+        }
+
+        /** Gate export / full report / asset copy — after user saw value, not on entry. */
+        function shouldGatePremiumExport() {
+            return !hasPremiumAccess();
+        }
+
+        function getTelegramBotUrl() {
+            const username = getBotShareLink();
+            if (!username) return '';
+            if (state.botLinkType === 'bot') return `https://t.me/${username}`;
+            return `https://t.me/${username}/app`;
+        }
+
+        function syncPlgChrome() {
+            const appRoot = document.getElementById('app');
+            if (appRoot) {
+                appRoot.classList.toggle('landing-compact', isTelegramWebApp());
+            }
+            if (openTelegramCta) {
+                const url = getTelegramBotUrl();
+                if (url && !isTelegramWebApp()) {
+                    openTelegramCta.href = url;
+                    openTelegramCta.classList.remove('hidden');
+                } else {
+                    openTelegramCta.classList.add('hidden');
+                }
+            }
+            updateQuotaLabel();
+        }
+
+        function scrollToAnalyzeSection() {
+            const section = document.getElementById('analyze-section');
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function applyDemoPrefillIfNeeded() {
+            if (state.history.length > 0) return;
+            if (state.draft.postInput || state.draft.postUrl || state.draft.sourceType) return;
+            if (!postInput) return;
+            setSourceType('text', { persistDraft: false });
+            const demo = state.lang === 'ru' ? DEMO_TEXT_RU : DEMO_TEXT_EN;
+            postInput.value = demo;
+            state.draft.postInput = demo;
+            state.draft.sourceType = 'text';
+            saveDraft();
+        }
+
+        function openStarsPaywallModal(reason = 'export', sourceScreen = lastPaywallSourceScreen) {
+            if (reason === 'analyze_limit') {
+                trackEvent(ANALYTICS_EVENTS.quota_limit_hit, {
+                    source: 'form',
+                    paywall_reason: 'quota_exceeded'
+                }, { location: 'openStarsPaywallModal' });
+            }
+            trackPaywallShown(reason, sourceScreen);
+            const score = state.lastAnalysisResult?.viral_score;
+            if (paywallModalScore && score != null) {
+                paywallModalScore.textContent = `${score}/100`;
+            } else if (paywallModalScore) {
+                paywallModalScore.textContent = '—';
+            }
+            const desc = document.getElementById('paywall-modal-desc');
+            if (desc && reason === 'analyze_limit') {
+                desc.textContent = t('paywallAnalyzeLimit');
+            } else if (desc) {
+                desc.textContent = t('paywallDesc');
+            }
+            if (starsPaywallModal) starsPaywallModal.classList.add('active');
+        }
+
+        function closeStarsPaywallModal() {
+            if (starsPaywallModal) starsPaywallModal.classList.remove('active');
+        }
+
+        function requirePremiumUnlock(intent, onAllowed) {
+            if (!shouldGatePremiumExport()) {
+                if (typeof onAllowed === 'function') onAllowed();
+                return true;
+            }
+            lastPaywallSourceScreen = screens.results?.classList.contains('active') ? 'results' : 'landing';
+            openStarsPaywallModal(intent, lastPaywallSourceScreen);
+            return false;
+        }
+
+        function syncResultsPremiumState() {
+            const gated = shouldGatePremiumExport();
+            if (screens.results) screens.results.classList.toggle('premium-gated', gated);
+            if (resultsPremiumBanner) resultsPremiumBanner.classList.toggle('visible', gated && Boolean(state.lastAnalysisResult));
+            syncPremiumInsightsTeaser();
+        }
+
+        function handlePrimaryCtaClick(source = 'form') {
+            trackCtaEngagement(source);
+            const hasInput = state.currentSourceType === 'text' && postInput?.value?.trim()
+                || state.currentSourceType === 'video-url' && postUrlInput?.value?.trim()
+                || state.currentSourceType === 'video-file' && state.selectedVideoFile;
+            if (hasInput) {
+                analyzeContent();
+            } else {
+                applyDemoPrefillIfNeeded();
+                scrollToAnalyzeSection();
+                if (state.currentSourceType === 'text' && postInput?.value?.trim()) {
+                    analyzeContent();
+                }
             }
         }
 
@@ -4249,7 +6275,7 @@
             state.geminiTransferPromise = null;
             state.uploadInProgress = false;
             analyzeBtn.disabled = false;
-            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+            if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
             if (state.selectedVideoObjectUrl) {
                 URL.revokeObjectURL(state.selectedVideoObjectUrl);
                 state.selectedVideoObjectUrl = '';
@@ -4328,7 +6354,7 @@
                 state.blobUploadPromise = null;
                 state.uploadInProgress = false;
                 analyzeBtn.disabled = false;
-                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
                 videoFileMeta.textContent = (state.lang === 'ru' ? '✅ Готово к анализу — ' : '✅ Ready — ') + file.name + ' · ' + formatBytes(file.size);
                 syncVideoAnalyzeButton();
             } catch (err) {
@@ -4338,7 +6364,7 @@
                 state.geminiTransferPromise = null;
                 state.uploadInProgress = false;
                 analyzeBtn.disabled = false;
-                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('analyzeButton');
+                if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
                 const errText = err?.message || t('blobUploadFailed');
                 videoFileMeta.textContent = (state.lang === 'ru' ? '❌ Ошибка загрузки: ' : '❌ Upload error: ') + errText;
                 console.error('Video pre-upload failed:', err);
@@ -4548,17 +6574,12 @@
         }
 
         function syncPaymentButtons() {
-            if (starsPayBtn) {
-                starsPayBtn.disabled = !state.starsInvoiceUrl;
-                starsPayBtn.title = state.starsInvoiceUrl ? '' : t('starsMissing');
+            if (paywallStarsBtn) {
+                paywallStarsBtn.disabled = !state.starsInvoiceUrl;
+                paywallStarsBtn.title = state.starsInvoiceUrl ? '' : t('starsMissing');
             }
-            if (cardPayBtn) {
-                cardPayBtn.disabled = !state.cardCheckoutUrl;
-                cardPayBtn.title = state.cardCheckoutUrl ? '' : t('cardMissing');
-            }
-            if (tributePayBtn) {
-                tributePayBtn.disabled = !state.tributeUrl;
-                tributePayBtn.title = state.tributeUrl ? '' : t('tributeMissing');
+            if (resultsUnlockCta) {
+                resultsUnlockCta.disabled = !state.starsInvoiceUrl;
             }
             if (copyBotLinkBtn) {
                 copyBotLinkBtn.disabled = !getBotShareLink();
@@ -4687,32 +6708,6 @@
 
         function normalizeBackendUrl(value) {
             return String(value || '').trim();
-        }
-
-        function initHeroImage() {
-            if (!heroImage) return;
-            const candidates = [];
-            try {
-                candidates.push(new URL('assets/viral-score-hero.png', window.location.href).href);
-            } catch {
-                // ignore
-            }
-            candidates.push('./assets/viral-score-hero.png');
-            candidates.push('assets/viral-score-hero.png');
-            let index = 0;
-            const tryNext = () => {
-                if (index >= candidates.length) {
-                    heroImage.removeAttribute('src');
-                    return;
-                }
-                heroImage.src = candidates[index++];
-            };
-            heroImage.addEventListener('error', tryNext);
-            heroImage.addEventListener('load', () => {
-                heroImage.style.opacity = '1';
-            });
-            heroImage.style.opacity = '0';
-            tryNext();
         }
 
         function getBackendHealthUrl() {
@@ -4862,8 +6857,23 @@
             for (let attempt = 0; attempt < 15; attempt += 1) {
                 await syncServerStatus();
                 if (state.accessUnlocked) {
+                    const score = state.lastAnalysisResult?.viral_score;
+                    trackFunnelOnce(FUNNEL_ONCE_KEYS.stars_checkout_success, ANALYTICS_EVENTS.stars_checkout_success, {
+                        paywall_variant: 'stars_modal',
+                        paywall_reason: lastPaywallReason,
+                        source_screen: lastPaywallSourceScreen,
+                        interaction_id: currentPaywallInteractionId,
+                        score_band: getScoreBand(score)
+                    }, 'confirmUnlockAfterPayment');
+                    trackFunnelOnce(FUNNEL_ONCE_KEYS.premium_unlock_success, ANALYTICS_EVENTS.premium_unlock_success, {
+                        paywall_reason: lastPaywallReason,
+                        source_screen: lastPaywallSourceScreen,
+                        score_band: getScoreBand(score)
+                    }, 'confirmUnlockAfterPayment');
                     updateQuotaLabel();
                     syncPaymentButtons();
+                    closeStarsPaywallModal();
+                    syncResultsPremiumState();
                     if (tg?.showAlert) {
                         tg.showAlert(method === 'stars' ? t('paidWithStars') : (state.lang === 'ru'
                             ? 'Доступ открыт. Можно продолжать анализ.'
@@ -4884,6 +6894,15 @@
                 mainError.style.display = 'block';
                 return;
             }
+            const score = state.lastAnalysisResult?.viral_score;
+            trackEvent(ANALYTICS_EVENTS.stars_checkout_started, {
+                paywall_variant: 'stars_modal',
+                paywall_reason: lastPaywallReason,
+                source_screen: lastPaywallSourceScreen,
+                interaction_id: currentPaywallInteractionId || makeInteractionId('checkout'),
+                score_band: getScoreBand(score),
+                score: Number.isFinite(Number(score)) ? Number(score) : undefined
+            }, { location: 'openStarsCheckout' });
             bindStarsInvoiceHandlers();
             starsCheckoutAwaitingUnlock = true;
             const onStarsInvoiceStatus = status => {
@@ -4896,6 +6915,14 @@
                 if (status === 'cancelled' || status === 'failed') {
                     starsCheckoutAwaitingUnlock = false;
                     clearStarsUnlockPoll();
+                    trackEvent(ANALYTICS_EVENTS.stars_checkout_failed, {
+                        paywall_variant: 'stars_modal',
+                        paywall_reason: lastPaywallReason,
+                        source_screen: lastPaywallSourceScreen,
+                        interaction_id: currentPaywallInteractionId,
+                        checkout_status: status,
+                        error_code: status === 'failed' ? 'checkout_failed' : 'checkout_cancelled'
+                    }, { location: 'openStarsCheckout' });
                 }
             };
             const openStarsInvoiceFallback = () => {
@@ -4964,10 +6991,36 @@
                 if (!container) return;
                 container.innerHTML = '';
                 if (!state.history.length) {
-                    const empty = document.createElement('div');
-                    empty.className = 'history-empty';
-                    empty.textContent = t('noAnalyses');
-                    container.appendChild(empty);
+                    const demo = document.createElement('button');
+                    demo.type = 'button';
+                    demo.className = 'history-item history-demo-item';
+                    demo.innerHTML = `
+                        <div class="history-item-title">${t('historyDemoTitle')}</div>
+                        <div class="history-item-meta">Instagram · Quick · 85/100 · demo</div>
+                    `;
+                    demo.addEventListener('click', () => {
+                        trackEvent(ANALYTICS_EVENTS.demo_result_view, {
+                            source: 'history_demo',
+                            score: DEMO_RESULT.viral_score
+                        });
+                        const meta = {
+                            id: 'demo',
+                            platform: 'Instagram',
+                            mode: 'quick',
+                            sourceLabel: t('historyDemoTitle'),
+                            sourceType: 'text',
+                            language: state.lang
+                        };
+                        state.lastAnalysisResult = { ...DEMO_RESULT };
+                        state.lastAnalysisMeta = meta;
+                        renderResults(DEMO_RESULT, meta);
+                        setScreen('results');
+                    });
+                    container.appendChild(demo);
+                    if (historyEmpty) {
+                        historyEmpty.textContent = t('historyDemoHint');
+                        historyEmpty.classList.remove('hidden');
+                    }
                     return;
                 }
                 state.history.forEach(entry => {
@@ -4987,7 +7040,12 @@
             };
             renderInto(historyList);
             renderInto(resultsHistoryList);
-            historyEmpty.classList.toggle('hidden', state.history.length > 0);
+            if (historyEmpty && state.history.length > 0) {
+                historyEmpty.classList.add('hidden');
+            } else if (historyEmpty && !historyList?.querySelector('.history-item')) {
+                historyEmpty.textContent = t('noAnalyses');
+                historyEmpty.classList.remove('hidden');
+            }
         }
 
         function pushHistory(entry) {
@@ -5165,9 +7223,14 @@
 
             renderComparison(data, state.history[1]);
 
+            syncResultsPremiumState();
+            renderPremiumInsightsTeaser(data, meta);
+
             if (tg && tg.MainButton) {
                 tg.MainButton.offClick(copyPrimaryAsset);
-                tg.MainButton.onClick(copyPrimaryAsset);
+                tg.MainButton.onClick(() => {
+                    requirePremiumUnlock('copy_hook', copyPrimaryAsset);
+                });
             }
         }
 
@@ -5258,11 +7321,41 @@
         }
 
         function wireCopyButtons() {
-            copyHookBtn.addEventListener('click', () => copyText(state.lastAnalysisResult?.improved_hook || '', copyHookBtn));
-            copyCaptionBtn.addEventListener('click', () => copyText(state.lastAnalysisResult?.improved_caption || '', copyCaptionBtn));
-            copyCtaBtn.addEventListener('click', () => copyText(state.lastAnalysisResult?.improved_cta || '', copyCtaBtn));
-            copyReportBtn.addEventListener('click', () => copyText(buildReportText(), copyReportBtn));
-            downloadReportBtn.addEventListener('click', downloadReport);
+            copyHookBtn.addEventListener('click', () => {
+                trackEvent(ANALYTICS_EVENTS.copy_hook_click, {
+                    source: 'result_screen',
+                    score: state.lastAnalysisResult?.viral_score ?? null
+                });
+                requirePremiumUnlock('copy_hook', () => copyText(state.lastAnalysisResult?.improved_hook || '', copyHookBtn));
+            });
+            copyCaptionBtn.addEventListener('click', () => {
+                trackEvent(ANALYTICS_EVENTS.copy_caption_click, {
+                    source: 'result_screen',
+                    score: state.lastAnalysisResult?.viral_score ?? null
+                });
+                requirePremiumUnlock('copy_caption', () => copyText(state.lastAnalysisResult?.improved_caption || '', copyCaptionBtn));
+            });
+            copyCtaBtn.addEventListener('click', () => {
+                trackEvent(ANALYTICS_EVENTS.copy_cta_click, {
+                    source: 'result_screen',
+                    score: state.lastAnalysisResult?.viral_score ?? null
+                });
+                requirePremiumUnlock('copy_cta', () => copyText(state.lastAnalysisResult?.improved_cta || '', copyCtaBtn));
+            });
+            copyReportBtn.addEventListener('click', () => {
+                trackEvent(ANALYTICS_EVENTS.copy_full_report_click, {
+                    source: 'result_screen',
+                    score: state.lastAnalysisResult?.viral_score ?? null
+                });
+                requirePremiumUnlock('copy_report', () => copyText(buildReportText(), copyReportBtn));
+            });
+            downloadReportBtn.addEventListener('click', () => {
+                trackEvent(ANALYTICS_EVENTS.download_report_click, {
+                    source: 'result_screen',
+                    score: state.lastAnalysisResult?.viral_score ?? null
+                });
+                requirePremiumUnlock('download_report', () => downloadReport());
+            });
         }
 
         async function uploadVideoFile(file) {
@@ -5595,10 +7688,11 @@
             }
 
             if (!state.accessUnlocked && state.freeLimit > 0 && state.usageCount >= state.freeLimit) {
-                mainError.textContent = getPaywallMessage();
-                mainError.style.display = 'block';
+                mainError.style.display = 'none';
                 if (errorActions) errorActions.classList.add('hidden');
                 syncPaymentButtons();
+                lastPaywallSourceScreen = 'landing';
+                openStarsPaywallModal('analyze_limit', 'landing');
                 return;
             }
 
@@ -5624,6 +7718,13 @@
             }
 
             state.analyzeInProgress = true;
+            currentAnalysisInteractionId = makeInteractionId('analysis');
+            trackEvent(ANALYTICS_EVENTS.analysis_started, {
+                source: 'form',
+                input_type: getInputTypeForAnalytics(),
+                analysis_mode: state.currentMode,
+                interaction_id: currentAnalysisInteractionId
+            }, { location: 'analyzeContent' });
             startLoading(getAnalyzeLoadingMessages());
 
             try {
@@ -5646,6 +7747,13 @@
             } catch (prepErr) {
                 stopLoading();
                 state.analyzeInProgress = false;
+                trackEvent(ANALYTICS_EVENTS.analysis_failed, {
+                    source: 'form',
+                    input_type: getInputTypeForAnalytics(),
+                    interaction_id: currentAnalysisInteractionId,
+                    error_code: extractErrorCode(prepErr),
+                    error_message: String(prepErr?.message || prepErr).slice(0, 200)
+                }, { location: 'analyzeContent:prep' });
                 setScreen('main');
                 mainError.textContent = prepErr?.message || t('videoTransferFailed');
                 mainError.style.display = 'block';
@@ -5720,12 +7828,26 @@
                 stopLoading();
                 renderResults(parsed, state.lastAnalysisMeta);
                 setScreen('results');
+                trackFunnelOnce(FUNNEL_ONCE_KEYS.analysis_completed, ANALYTICS_EVENTS.analysis_completed, {
+                    source: 'form',
+                    input_type: getInputTypeForAnalytics(),
+                    interaction_id: currentAnalysisInteractionId,
+                    score: parsed.viral_score,
+                    score_band: getScoreBand(parsed.viral_score)
+                }, 'analyzeContent:success');
                 syncServerHistory();
                 if (tg && tg.HapticFeedback) {
                     tg.HapticFeedback.impactOccurred('medium');
                 }
             } catch (err) {
                 console.error(err);
+                trackEvent(ANALYTICS_EVENTS.analysis_failed, {
+                    source: 'form',
+                    input_type: getInputTypeForAnalytics(),
+                    interaction_id: currentAnalysisInteractionId || makeInteractionId('analysis'),
+                    error_code: extractErrorCode(err),
+                    error_message: String(err?.message || err).slice(0, 200)
+                }, { location: 'analyzeContent:catch' });
                 stopLoading();
                 setScreen('main');
                 const isLocalFileUpload = state.currentSourceType === 'video-file' && window.location.protocol === 'file:';
@@ -5805,9 +7927,37 @@
             sourceButtons.forEach(button => button.addEventListener('click', () => setSourceType(button.dataset.source)));
             modeButtons.forEach(button => button.addEventListener('click', () => setMode(button.dataset.mode)));
             platformButtons.forEach(button => button.addEventListener('click', () => setPlatform(button.dataset.platform)));
-            starsPayBtn.addEventListener('click', openStarsCheckout);
-            cardPayBtn.addEventListener('click', openCardCheckout);
-            tributePayBtn.addEventListener('click', openTributeCheckout);
+            if (heroPrimaryCta) heroPrimaryCta.addEventListener('click', () => handlePrimaryCtaClick('hero'));
+            if (footerPrimaryCta) footerPrimaryCta.addEventListener('click', () => handlePrimaryCtaClick('footer'));
+            if (openTelegramCta) {
+                openTelegramCta.addEventListener('click', () => {
+                    trackEvent(ANALYTICS_EVENTS.telegram_open_click, { source: 'landing' });
+                });
+            }
+            if (closePaywallBtn) closePaywallBtn.addEventListener('click', closeStarsPaywallModal);
+            if (starsPaywallModal) {
+                starsPaywallModal.addEventListener('click', event => {
+                    if (event.target === starsPaywallModal) closeStarsPaywallModal();
+                });
+            }
+            if (paywallStarsBtn) {
+                paywallStarsBtn.addEventListener('click', () => {
+                    trackEvent(ANALYTICS_EVENTS.paywall_cta_click, {
+                        paywall_variant: 'stars_modal',
+                        paywall_reason: lastPaywallReason,
+                        source_screen: lastPaywallSourceScreen,
+                        interaction_id: currentPaywallInteractionId
+                    }, { location: 'paywall-stars-btn' });
+                    closeStarsPaywallModal();
+                    openStarsCheckout();
+                });
+            }
+            if (resultsUnlockCta) {
+                resultsUnlockCta.addEventListener('click', () => {
+                    lastPaywallSourceScreen = 'results';
+                    openStarsPaywallModal('export', 'results');
+                });
+            }
             retryBtn.addEventListener('click', analyzeContent);
             restoreDraftBtn.addEventListener('click', restoreDraft);
             clearDraftBtn.addEventListener('click', clearDraft);
@@ -5887,6 +8037,7 @@
                     mainError.style.display = 'block';
                     return;
                 }
+                trackCtaEngagement('form');
                 analyzeContent();
             });
             [appHomeBtn, backHomeTopBtn, backHomeMainBtn, analyzeAgainBtn].forEach(btn => {
@@ -5949,14 +8100,18 @@
             })();
 
             if (tg && tg.MainButton) {
-                tg.MainButton.onClick(copyPrimaryAsset);
+                tg.MainButton.onClick(() => {
+                    requirePremiumUnlock('copy_hook', copyPrimaryAsset);
+                });
             }
         }
+
+        initGrowthLayer();
 
         setMode(state.currentMode);
         setPlatform(state.currentPlatform);
         setBillingMode(state.billingMode);
-        initHeroImage();
+        setSourceType(state.draft.sourceType || 'text', { persistDraft: false });
         syncPaymentButtons();
         renderBackendStatusPill();
         renderHistory();
@@ -5977,12 +8132,15 @@
         updateQuotaLabel();
         ensureTelegramClientId();
 
+        applyDemoPrefillIfNeeded();
+        syncPlgChrome();
         if (!canAnalyze()) {
             openSettings();
         } else {
             refreshBackendHealth().then(async () => {
                 await maybeAutoConfigureMonetization();
                 await Promise.all([syncServerStatus(), syncServerHistory()]);
+                syncPlgChrome();
             });
         }
     </script>
