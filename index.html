@@ -4776,6 +4776,41 @@
             }
         }
 
+        /**
+         * Maps multi-step uploads (Blob → Gemini → processing) onto one 0–100% bar.
+         * When a step resets its local counter (e.g. 90% → 10%), we continue in the remaining range
+         * instead of jumping backward — avoids confusing UX.
+         */
+        function createAdaptiveUploadProgress(onProgress) {
+            let displayed = 0;
+            let segmentStart = 0;
+            let lastRaw = 0;
+            const PHASE_RESET_DROP = 12;
+
+            return (rawPct) => {
+                if (!onProgress) return;
+                const raw = Math.max(0, Math.min(100, Math.round(Number(rawPct) || 0)));
+
+                if (raw >= 100) {
+                    displayed = 100;
+                    lastRaw = 100;
+                    onProgress(100);
+                    return;
+                }
+
+                if (raw < lastRaw - PHASE_RESET_DROP && displayed >= 8) {
+                    segmentStart = displayed;
+                }
+                lastRaw = raw;
+
+                const remaining = Math.max(1, 100 - segmentStart);
+                const mapped = segmentStart + (raw / 100) * remaining;
+                const next = Math.min(99, Math.max(displayed, Math.round(mapped)));
+                displayed = next;
+                onProgress(displayed);
+            };
+        }
+
         /** Poll Gemini only when API explicitly reports a non-ACTIVE state (not when state is missing). */
         function geminiFileNeedsProcessingWait(uploadedFile) {
             const state = uploadedFile?.state;
@@ -6337,19 +6372,19 @@
                         + lastPct + '% — ' + (state.lang === 'ru' ? 'подожди или обнови страницу' : 'wait or refresh');
                 }
             }, 8000);
+            const reportUploadProgress = createAdaptiveUploadProgress((pct) => {
+                lastPct = pct;
+                lastPctAt = Date.now();
+                if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
+                let statusNote = '';
+                if (pct >= 92) statusNote = ' · ' + t('uploadProcessingGemini');
+                else if (pct >= 55) statusNote = state.lang === 'ru' ? ' · Gemini' : ' · Gemini';
+                else if (pct >= 8) statusNote = state.lang === 'ru' ? ' · хранилище' : ' · storage';
+                videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
+                    + pct + '%' + statusNote + ' · ' + file.name + ' · ' + formatBytes(file.size);
+            });
             try {
-                const uploadPromise = prepareVideoUpload(file, (pct) => {
-                    lastPct = pct;
-                    lastPctAt = Date.now();
-                    if (analyzeBtnLabel) analyzeBtnLabel.textContent = (state.lang === 'ru' ? '⏫ Загрузка ' : '⏫ Uploading ') + pct + '%';
-                    let statusNote = '';
-                    if (pct >= 78) statusNote = ' · ' + t('uploadProcessingGemini');
-                    else if (isLarge && pct >= 10 && pct < 78 && !isTelegramWebApp()) {
-                        statusNote = state.lang === 'ru' ? ' · хранилище/Gemini' : ' · storage/Gemini';
-                    } else if (isLarge && isTelegramWebApp()) statusNote = ' · Blob';
-                    videoFileMeta.textContent = (state.lang === 'ru' ? 'Загрузка... ' : 'Uploading... ')
-                        + pct + '%' + statusNote + ' · ' + file.name + ' · ' + formatBytes(file.size);
-                });
+                const uploadPromise = prepareVideoUpload(file, reportUploadProgress);
                 state.blobUploadPromise = uploadPromise;
                 const uploaded = await uploadPromise;
                 if (state.selectedVideoFile !== file) return;
