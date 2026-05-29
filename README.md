@@ -21,10 +21,10 @@ BOT_TOKEN="your_telegram_bot_token"
 UNLOCK_SECRET="long_random_secret_for_card_webhooks"
 ```
 
-3. Start the dev server:
+3. Start the dev server (serves the static app + the same `api/*` functions as prod):
 
 ```bash
-npm run dev   # runs `vercel dev`
+vercel dev          # or: npx vercel dev
 ```
 
 4. Open the printed local URL (default `http://localhost:3000`).
