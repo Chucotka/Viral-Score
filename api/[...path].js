@@ -1386,6 +1386,18 @@ async function handleTelegramUpdate(update) {
       return { ok: true, handled: true, clientId, fileId };
     }
 
+    // appss.pro catalog ownership verification: reply to the verify command
+    // with the exact code shown in the appss listing draft.
+    const appssVerifyCmd = (process.env.APPSS_VERIFY_COMMAND || '/appss_verify').trim();
+    const appssVerifyResponse = (process.env.APPSS_VERIFY_RESPONSE || '').trim();
+    if (appssVerifyResponse && msg.text) {
+      const cmd = msg.text.trim().split(/\s+/)[0].split('@')[0];
+      if (cmd === appssVerifyCmd) {
+        if (chatId) await sendTgMessage(chatId, appssVerifyResponse, { parse_mode: undefined }).catch(() => {});
+        return { ok: true, handled: true, appssVerify: true };
+      }
+    }
+
     // /start command — show instructions
     if (msg.text?.startsWith('/start')) {
       if (chatId) {
