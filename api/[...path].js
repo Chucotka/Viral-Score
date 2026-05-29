@@ -69,8 +69,17 @@ function isRetryableGeminiError(message, status) {
   return /high demand|overloaded|resource exhausted|rate limit|too many requests|try again later|temporarily unavailable|service unavailable|quota exceeded|capacity/.test(text);
 }
 
+/** Uploaded Gemini file is gone (expired / already cleaned up / wrong key). Retrying other models won't help. */
+function isMissingFileError(message) {
+  const text = String(message || '').toLowerCase();
+  return /permission to access the file|file .*may not exist|may not exist|file .*(not found|does not exist)/.test(text);
+}
+
 function userFacingGeminiError(error) {
   const msg = String(error?.message || error || '');
+  if (isMissingFileError(msg)) {
+    return 'The uploaded video is no longer available on the AI server (it expired or was already used). Please re-upload the video and try again.';
+  }
   if (isRetryableGeminiError(msg)) {
     return 'Gemini is temporarily overloaded. Please wait a moment and try again.';
   }
@@ -745,6 +754,11 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
           const status = response.status;
           const errMsg = await getApiError(response, `Model ${model} failed: ${status}`);
           lastError = new Error(errMsg);
+          if (isMissingFileError(errMsg)) {
+            const fileError = new Error(errMsg);
+            fileError.code = 'UPLOADED_FILE_MISSING';
+            throw fileError;
+          }
           if (isUnavailableModelError(errMsg)) {
             skipModel = true;
             break;
@@ -816,6 +830,12 @@ async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
     } catch (error) {
       lastError = error;
       const msg = String(error?.message || '');
+      if (error?.code === 'UPLOADED_FILE_MISSING' || isMissingFileError(msg)) {
+        const fileError = new Error(userFacingGeminiError(error));
+        fileError.statusCode = 409;
+        fileError.code = 'UPLOADED_FILE_MISSING';
+        throw fileError;
+      }
       if (!isRetryableGeminiError(msg) && !/timed out|timeout/i.test(msg)) {
         throw error;
       }
@@ -1158,13 +1178,17 @@ async function analyzeMultipart(formData) {
   client.history = [normalizeHistoryEntry(savedAnalysis), ...((client.history || []).map(normalizeHistoryEntry))].slice(0, 8);
   await saveClient(client);
 
-  try {
-    await cleanupTransientUploadArtifacts({
-      fileUri: cleanupFileUri,
-      videoBlobUrl: cleanupBlobUrl || String(formData.get('videoBlobUrl') || '').trim()
-    });
-  } catch (cleanupError) {
-    console.warn('Transient upload cleanup failed:', cleanupError);
+  // Keep the uploaded file + blob when the analysis degraded, so a retry can still
+  // reach the video once Gemini capacity returns. Only clean up on a real success.
+  if (!analysisDegraded) {
+    try {
+      await cleanupTransientUploadArtifacts({
+        fileUri: cleanupFileUri,
+        videoBlobUrl: cleanupBlobUrl || String(formData.get('videoBlobUrl') || '').trim()
+      });
+    } catch (cleanupError) {
+      console.warn('Transient upload cleanup failed:', cleanupError);
+    }
   }
 
   return {

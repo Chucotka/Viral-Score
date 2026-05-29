@@ -7636,6 +7636,18 @@
                 if (response.status === 402) {
                     throw new Error(await getApiError(response, getPaywallMessage()));
                 }
+                if (response.status === 409) {
+                    // Cached Gemini upload was cleaned up / expired. Drop it and re-upload so the next Analyze works.
+                    const msg = await getApiError(response, t('videoTransferFailed'));
+                    state.uploadedVideoFileUri = '';
+                    state.uploadedVideoMimeType = '';
+                    state.uploadedVideoBlobUrl = '';
+                    state.geminiTransferPromise = null;
+                    if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
+                        startGeminiUpload(state.selectedVideoFile);
+                    }
+                    throw new Error(msg);
+                }
                 if (response.status === 504 || response.status === 524) {
                     throw new Error(t('analysisTimeout'));
                 }
