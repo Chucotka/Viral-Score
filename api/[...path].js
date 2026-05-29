@@ -1328,11 +1328,29 @@ async function sendTgMessage(chatId, text, extra = {}) {
 }
 
 async function handleTelegramUpdate(update) {
+  // Telegram requires pre_checkout_query to be answered within 10s, otherwise
+  // the payment is cancelled and successful_payment never fires.
+  const preCheckout = update?.pre_checkout_query;
+  if (preCheckout) {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerPreCheckoutQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pre_checkout_query_id: preCheckout.id, ok: true })
+    }).catch(() => {});
+    return { ok: true, handled: true, preCheckout: true };
+  }
+
   const payment = update?.message?.successful_payment;
   if (payment) {
     const clientId = extractClientIdFromPayload(payment.invoice_payload);
     if (!clientId) return { ok: false, error: 'Missing client payload in successful payment.' };
     const unlocked = await unlockClientAccess(clientId, 'stars');
+    const chatId = update?.message?.chat?.id;
+    if (chatId) {
+      await sendTgMessage(chatId,
+        '✅ Оплата получена! Премиум-доступ разблокирован. Вернись в приложение — все функции уже открыты.'
+      ).catch(() => {});
+    }
     return { ok: true, handled: true, ...unlocked };
   }
 
@@ -1888,6 +1906,13 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST' && path === '/api/telegram-webhook') {
+      const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET || '';
+      if (webhookSecret) {
+        const provided = String(req.headers['x-telegram-bot-api-secret-token'] || '');
+        if (provided !== webhookSecret) {
+          return sendJson(res, 401, { ok: false, error: 'Unauthorized webhook request.' });
+        }
+      }
       const update = await readJson(req, url);
       return sendJson(res, 200, await handleTelegramUpdate(update));
     }
