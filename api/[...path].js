@@ -53,10 +53,11 @@ async function downloadTgFile(fileId) {
 }
 // Text/quick: lite first for speed. Video: multimodal models only (no lite on file_data).
 const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-// Primary keeps it lean (2 fast pools) for speed; passes below add distinct pools only if needed.
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.0-flash'];
-/** Second-chance models when API reports high demand: hit DIFFERENT pools (latest alias + pro). */
-const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-flash-latest', 'gemini-2.5-pro'];
+// gemini-2.0-flash is deprecated for new projects, so we don't use it. Primary stays lean
+// (guaranteed fast + strong models); passes below add a distinct pool only if needed.
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-pro'];
+/** Second-chance models when API reports high demand: hit a DIFFERENT pool (latest alias) + guaranteed flash. */
+const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-flash-latest', 'gemini-2.5-flash'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
@@ -854,7 +855,12 @@ async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
         fileError.code = 'UPLOADED_FILE_MISSING';
         throw fileError;
       }
-      if (!isRetryableGeminiError(msg) && !/timed out|timeout/i.test(msg)) {
+      // Keep going to the next pass on overload, timeout, OR an unavailable model — only a
+      // genuinely fatal, non-recoverable error should abort the whole pipeline.
+      const recoverable = isRetryableGeminiError(msg)
+        || /timed out|timeout/i.test(msg)
+        || isUnavailableModelError(msg);
+      if (!recoverable) {
         throw error;
       }
       console.info('[analyze] video Gemini', pass.label, 'pass failed:', msg.slice(0, 120));

@@ -32,7 +32,7 @@ const INDEX_PATH = path.join(__dirname, 'index.html');
 const CONTRACT_PATH = path.join(__dirname, 'BACKEND_CONTRACT.md');
 const STATE_PATH = path.join(__dirname, 'server-state.json');
 const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
