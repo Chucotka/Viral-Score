@@ -53,9 +53,10 @@ async function downloadTgFile(fileId) {
 }
 // Text/quick: lite first for speed. Video: multimodal models only (no lite on file_data).
 const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
-/** Second-chance models when API reports high demand: hit DIFFERENT pools (latest aliases + pro). */
-const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-flash-latest', 'gemini-2.0-flash', 'gemini-pro-latest'];
+// Primary keeps it lean (2 fast pools) for speed; passes below add distinct pools only if needed.
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+/** Second-chance models when API reports high demand: hit DIFFERENT pools (latest alias + pro). */
+const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-flash-latest', 'gemini-2.5-pro'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
@@ -86,13 +87,16 @@ function userFacingGeminiError(error) {
   return msg || 'Analysis failed.';
 }
 
-// Text: short retries. Video: patient retries + recovery pass before text-only fallback.
+// Text: short retries. Video: lean retries + recovery pass before text-only fallback.
+// Speed: model diversity (across passes) does the heavy lifting, so per-model retries stay small.
 const GEMINI_RETRY_DELAYS_MS = [400, 900];
-const GEMINI_VIDEO_RETRY_DELAYS_MS = [1500, 3000, 6000, 10000];
-const GEMINI_VIDEO_RECOVERY_RETRY_DELAYS_MS = [2500, 5000, 9000, 14000];
+const GEMINI_VIDEO_RETRY_DELAYS_MS = [1200, 3000];
+const GEMINI_VIDEO_RECOVERY_RETRY_DELAYS_MS = [2500, 5000];
 const GEMINI_MAX_ATTEMPTS_PER_MODEL = 2;
-const GEMINI_MAX_VIDEO_ATTEMPTS_PER_MODEL = 4;
-const GEMINI_VIDEO_RECOVERY_PAUSE_MS = 10000;
+const GEMINI_MAX_VIDEO_ATTEMPTS_PER_MODEL = 2;
+const GEMINI_VIDEO_RECOVERY_PAUSE_MS = 3500;
+/** Overall wall-clock budget for the video pipeline; past this we skip to fast degraded text. */
+const GEMINI_VIDEO_PIPELINE_BUDGET_MS = 225000;
 
 function requestUsesTools(requestBody) {
   return Array.isArray(requestBody?.tools) && requestBody.tools.length > 0;
@@ -663,7 +667,7 @@ async function uploadVideoFromBlobUrl(videoUrl, options = {}) {
 }
 
 const GEMINI_GENERATE_TIMEOUT_MS = 90000;
-const GEMINI_VIDEO_GENERATE_TIMEOUT_MS = 150000;
+const GEMINI_VIDEO_GENERATE_TIMEOUT_MS = 130000;
 
 function shouldUseTextFallback(error) {
   const msg = String(error?.message || error || '');
@@ -723,8 +727,12 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
   let lastError = null;
   for (const model of models) {
     let skipModel = false;
-    for (const tokenCap of (maxOutputTokens >= 4096 ? [maxOutputTokens] : [maxOutputTokens, 4096])) {
+    const tokenCaps = maxOutputTokens >= 4096 ? [maxOutputTokens] : [maxOutputTokens, 4096];
+    for (let capIdx = 0; capIdx < tokenCaps.length; capIdx += 1) {
       if (skipModel) break;
+      const tokenCap = tokenCaps[capIdx];
+      // Only escalate to the next token cap when a response was cut off (MAX_TOKENS).
+      let escalateTokens = false;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         try {
           const generationConfig = buildGenerationConfig({
@@ -747,6 +755,7 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
             const finishReason = data?.candidates?.[0]?.finishReason;
             if (finishReason === 'MAX_TOKENS' && tokenCap < 4096) {
               lastError = new Error(`Model ${model} response was cut off.`);
+              escalateTokens = true;
               break;
             }
             return data;
@@ -776,6 +785,8 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
           throw error;
         }
       }
+      // A higher token cap only helps for MAX_TOKENS cutoffs, not overload/timeout/errors.
+      if (!escalateTokens) break;
     }
   }
   throw lastError || new Error('All Gemini models failed.');
@@ -797,6 +808,7 @@ async function ensureGeminiFileActive(fileUri, mimeType, maxWaitMs = 45000) {
 }
 
 async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
+  const startedAt = Date.now();
   const passes = [
     { label: 'primary', run: () => callGemini(requestBody, mode, { isVideo: true }) },
     {
@@ -821,6 +833,12 @@ async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
 
   let lastError = null;
   for (const pass of passes) {
+    // Stay within the function budget: if time is nearly spent, skip to fast degraded text
+    // so the user always gets a response instead of a hard timeout.
+    if (pass.label !== 'primary' && Date.now() - startedAt > GEMINI_VIDEO_PIPELINE_BUDGET_MS) {
+      console.info('[analyze] video pipeline budget exhausted, skipping', pass.label);
+      break;
+    }
     try {
       const data = await pass.run();
       if (pass.label !== 'primary') {
