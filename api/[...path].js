@@ -51,13 +51,15 @@ async function downloadTgFile(fileId) {
   if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
-// Text/quick: lite first for speed. Video: multimodal models only (no lite on file_data).
-const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-// gemini-2.0-flash is deprecated for new projects, so we don't use it. Primary stays lean
-// (guaranteed fast + strong models); passes below add a distinct pool only if needed.
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-pro'];
-/** Second-chance models when API reports high demand: hit a DIFFERENT pool (latest alias) + guaranteed flash. */
-const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-flash-latest', 'gemini-2.5-flash'];
+// All models below are confirmed available on the (paid) key, 1M input context.
+// Tiered strategy spreads load across distinct capacity pools so a single model's
+// "high demand" spike never breaks the request.
+// Text: lite first for speed, then flash + latest alias, then pro.
+const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
+// Video primary: fast + high quality, with the latest-alias pool as immediate second pool.
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-flash-latest'];
+/** Recovery on high demand: stronger pro tier (separate capacity, rarely overloaded). */
+const MODEL_CANDIDATES_VIDEO_RECOVERY = ['gemini-2.5-pro', 'gemini-pro-latest'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
@@ -824,10 +826,10 @@ async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
       }
     },
     {
-      label: 'flash-only',
+      label: 'flash-lite',
       run: () => callGemini(requestBody, 'quick', {
         isVideo: true,
-        modelsOverride: ['gemini-flash-latest', 'gemini-2.5-flash']
+        modelsOverride: ['gemini-2.5-flash-lite', 'gemini-flash-lite-latest']
       })
     }
   ];
@@ -1481,19 +1483,6 @@ export default async function handler(req, res) {
         'Content-Type, X-Mime-Type, x-mime-type, X-File-Size, X-File-Name, X-Upload-Url, X-Upload-Session-Id, x-upload-session-id, X-Chunk-Offset, x-chunk-offset, X-Goog-Upload-Command, x-goog-upload-command'
       );
       return res.end();
-    }
-
-    // TEMP diagnostic: list models available to this key (guarded by UNLOCK_SECRET).
-    if (req.method === 'GET' && path === '/api/_debug-models') {
-      const secret = String(req.headers['x-unlock-secret'] || '').trim();
-      if (!UNLOCK_SECRET || secret !== UNLOCK_SECRET) return sendJson(res, 401, { error: 'unauthorized' });
-      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'no key' });
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(GEMINI_API_KEY)}&pageSize=200`);
-      const j = await r.json();
-      const models = (j.models || [])
-        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-        .map(m => ({ name: m.name.replace('models/', ''), in: m.inputTokenLimit, out: m.outputTokenLimit }));
-      return sendJson(res, 200, { count: models.length, models });
     }
 
     if (req.method === 'GET' && path === '/api/public-config') {
