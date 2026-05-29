@@ -3784,11 +3784,42 @@
             });
         }
 
-        function initPostHog() {
+        async function fetchPublicPostHogConfig() {
+            const endpoints = [];
+            try {
+                const ep = getBackendEndpointUrl && getBackendEndpointUrl('/api/public-config');
+                if (ep) endpoints.push(ep);
+            } catch { /* ignore */ }
+            endpoints.push('/api/public-config');
+            for (const ep of endpoints) {
+                try {
+                    const res = await fetch(ep, { method: 'GET' });
+                    if (!res.ok) continue;
+                    const cfg = await res.json();
+                    if (cfg && cfg.posthogKey) return cfg;
+                } catch { /* try next */ }
+            }
+            return null;
+        }
+
+        async function initPostHog() {
             if (postHogInitStarted) return;
             postHogInitStarted = true;
-            const { apiKey, apiHost } = readPostHogConfig();
             registerAnalyticsProvider(createPostHogProviderAdapter());
+            let { apiKey, apiHost } = readPostHogConfig();
+            if (!apiKey) {
+                const cfg = await fetchPublicPostHogConfig();
+                if (cfg && cfg.posthogKey) {
+                    apiKey = cfg.posthogKey;
+                    apiHost = cfg.posthogHost || apiHost;
+                    // Cache so QA checklist + later reads see the resolved key.
+                    window.VIRAL_SCORE_ANALYTICS = {
+                        ...(window.VIRAL_SCORE_ANALYTICS || {}),
+                        posthogKey: apiKey,
+                        posthogHost: apiHost
+                    };
+                }
+            }
             if (!apiKey) return;
             loadPostHogSdk(apiKey, apiHost).catch(err => console.warn('[analytics] PostHog', err));
         }

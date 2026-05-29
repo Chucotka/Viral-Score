@@ -1459,6 +1459,13 @@ export default async function handler(req, res) {
       return res.end();
     }
 
+    if (req.method === 'GET' && path === '/api/public-config') {
+      return sendJson(res, 200, {
+        posthogKey: process.env.NEXT_PUBLIC_POSTHOG_KEY || process.env.POSTHOG_KEY || '',
+        posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com'
+      });
+    }
+
     if (req.method === 'GET' && (path === '/health' || path === '/api/health')) {
       return sendJson(res, 200, {
         ok: true,

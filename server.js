@@ -949,6 +949,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/BACKEND_CONTRACT.md') {
       return serveFile(res, CONTRACT_PATH, 'text/markdown; charset=utf-8');
     }
+    if (req.method === 'GET' && url.pathname === '/api/public-config') {
+      return sendJson(res, 200, {
+        posthogKey: process.env.NEXT_PUBLIC_POSTHOG_KEY || process.env.POSTHOG_KEY || '',
+        posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com'
+      });
+    }
+
     if (req.method === 'GET' && url.pathname === '/health') {
       return sendJson(res, 200, {
         ok: true,
