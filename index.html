@@ -2639,7 +2639,8 @@
                 pasteTextFirst: 'Paste your caption, transcript, or script first.',
                 localFileBlocked: 'Video upload is blocked from a local file page. Open the app from HTTPS/Telegram hosting, or test with a public YouTube link.',
                 analysisFailed: 'Analysis failed. Check the input and your API key, then try again.',
-                geminiOverloaded: 'Gemini is temporarily overloaded. Wait a moment and try again.',
+                geminiOverloaded: 'AI is busy and we could not finish the analysis. Try again in a minute.',
+                analysisDegradedNote: 'Score based on your text and context — the video was not fully scanned because the AI service was busy.',
                 analysisTimeout: 'The analysis took too long. Wait until the file shows ready, try a shorter clip (under 60s), or run again.',
                 analysisRetrying: 'Retrying analysis...',
                 retryAnalysis: 'Retry analysis',
@@ -2882,7 +2883,8 @@
                 pasteTextFirst: 'Сначала вставь caption, транскрипт или сценарий.',
                 localFileBlocked: 'Загрузка видео заблокирована со страницы file://. Открой приложение через HTTPS/Telegram hosting или протестируй публичную YouTube-ссылку.',
                 analysisFailed: 'Анализ не удался. Проверь входные данные и API key, затем попробуй снова.',
-                geminiOverloaded: 'Сервис Gemini временно перегружен. Подождите немного и попробуйте снова.',
+                geminiOverloaded: 'AI перегружен, анализ не удалось завершить. Попробуйте через минуту.',
+                analysisDegradedNote: 'Оценка по тексту и контексту — видео не было полностью просмотрено из‑за перегрузки AI.',
                 analysisTimeout: 'Анализ занял слишком много времени. Дождись «Готово к анализу», попробуй ролик короче 60 с или запусти снова.',
                 analysisRetrying: 'Повторяем анализ...',
                 retryAnalysis: 'Повторить анализ',
@@ -7176,7 +7178,10 @@
 
             const modeLabel = getModeLabel(meta.mode || state.currentMode);
             analysisSummaryKicker.textContent = meta.sourceLabel ? `${meta.sourceLabel} · ${meta.platform || state.currentPlatform} · ${modeLabel}` : t('analysis');
-            analysisSummaryText.textContent = data.summary || t('noSummary');
+            const summaryBase = data.summary || t('noSummary');
+            analysisSummaryText.textContent = meta.analysisDegraded
+                ? `${summaryBase}\n\n${t('analysisDegradedNote')}`
+                : summaryBase;
 
             setTimeout(() => {
                 let currentScore = 0;
@@ -7820,7 +7825,8 @@
                     mode: effectiveMode,
                     sourceLabel: getSourceLabel(),
                     sourceType: state.currentSourceType,
-                    language: state.lang
+                    language: state.lang,
+                    analysisDegraded: usedBackend ? Boolean(backendResponse.analysisDegraded) : false
                 };
                 saveCurrentAnalysis(parsed, state.lastAnalysisMeta, usedBackend ? analysisId : null);
                 if (!usedBackend) {
