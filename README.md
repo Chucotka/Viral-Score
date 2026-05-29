@@ -4,28 +4,32 @@ Short-form content analyzer for video files, video links, and text.
 
 ## Local run
 
-1. Set your server key:
+Local dev runs the exact same serverless code as production (`api/[...path].js`) via the Vercel CLI, so there is a single source of truth.
+
+1. Install the CLI once and link the project:
 
 ```bash
-export GEMINI_API_KEY="your_key_here"
-export BOT_TOKEN="your_telegram_bot_token"
-export UNLOCK_SECRET="long_random_secret_for_card_webhooks"
+npm i -g vercel   # or use: npx vercel
+vercel link
 ```
 
-2. Start the backend:
+2. Provide secrets via `.env.local` (or `vercel env pull`):
 
 ```bash
-npm start
+GEMINI_API_KEY="your_key_here"
+BOT_TOKEN="your_telegram_bot_token"
+UNLOCK_SECRET="long_random_secret_for_card_webhooks"
 ```
 
-3. Open:
+3. Start the dev server:
 
-```txt
-http://127.0.0.1:3000
+```bash
+npm run dev   # runs `vercel dev`
 ```
 
-The app will use `http://127.0.0.1:3000/api/analyze` by default when opened from `file://`.
-The backend health check lives at `http://127.0.0.1:3000/health`.
+4. Open the printed local URL (default `http://localhost:3000`).
+
+The backend health check lives at `/health`.
 `/health` also reports whether Telegram bot payments are configured.
 Client usage sync lives at `http://127.0.0.1:3000/api/status?clientId=...`.
 Client history sync lives at `http://127.0.0.1:3000/api/history?clientId=...`.
@@ -34,7 +38,6 @@ Telegram Stars webhooks can hit `POST /api/telegram-webhook`.
 Payment payloads can be fetched from `GET /api/payment-payload?clientId=...&method=stars`.
 Stars invoice links can be generated with `POST /api/stars-invoice-link`.
 Each analysis sends a stable `analysisId` so history stays deduplicated across client and server.
-If your environment blocks `0.0.0.0`, the server binds to `127.0.0.1`.
 
 External card checkout can be configured in the app settings. The app appends:
 

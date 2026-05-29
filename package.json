@@ -7,6 +7,7 @@
     "@vercel/blob": "^0.27.1"
   },
   "scripts": {
-    "start": "node server.js"
+    "dev": "vercel dev",
+    "start": "vercel dev"
   }
 }
