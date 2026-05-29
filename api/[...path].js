@@ -1483,6 +1483,19 @@ export default async function handler(req, res) {
       return res.end();
     }
 
+    // TEMP diagnostic: list models available to this key (guarded by UNLOCK_SECRET).
+    if (req.method === 'GET' && path === '/api/_debug-models') {
+      const secret = String(req.headers['x-unlock-secret'] || '').trim();
+      if (!UNLOCK_SECRET || secret !== UNLOCK_SECRET) return sendJson(res, 401, { error: 'unauthorized' });
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'no key' });
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(GEMINI_API_KEY)}&pageSize=200`);
+      const j = await r.json();
+      const models = (j.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => ({ name: m.name.replace('models/', ''), in: m.inputTokenLimit, out: m.outputTokenLimit }));
+      return sendJson(res, 200, { count: models.length, models });
+    }
+
     if (req.method === 'GET' && path === '/api/public-config') {
       return sendJson(res, 200, {
         posthogKey: process.env.NEXT_PUBLIC_POSTHOG_KEY || process.env.POSTHOG_KEY || '',
