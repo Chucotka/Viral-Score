@@ -47,9 +47,9 @@ async function downloadTgFile(fileId) {
   if (!fileRes.ok) throw new Error(`Download failed: ${fileRes.status}`);
   return { buffer: Buffer.from(await fileRes.arrayBuffer()), filePath };
 }
-// Lite first: lower latency and often better availability under peak load.
+// Text/quick: lite first for speed. Video: flash/pro only (multimodal; lite is weak on file_data video).
 const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-pro'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
@@ -71,9 +71,11 @@ function userFacingGeminiError(error) {
   return msg || 'Analysis failed.';
 }
 
-// Short retries only — if still failing, fall back to text analysis instead of making users wait.
+// Text: short retries. Video: more patience before degraded text-only fallback.
 const GEMINI_RETRY_DELAYS_MS = [400, 900];
+const GEMINI_VIDEO_RETRY_DELAYS_MS = [1200, 2500, 5000];
 const GEMINI_MAX_ATTEMPTS_PER_MODEL = 2;
+const GEMINI_MAX_VIDEO_ATTEMPTS_PER_MODEL = 3;
 
 function requestUsesTools(requestBody) {
   return Array.isArray(requestBody?.tools) && requestBody.tools.length > 0;
@@ -689,7 +691,8 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
     : (isVideo
       ? MODEL_CANDIDATES_VIDEO
       : (quick ? MODEL_CANDIDATES.slice(0, 2) : MODEL_CANDIDATES));
-  const maxAttempts = liteOnly ? 1 : GEMINI_MAX_ATTEMPTS_PER_MODEL;
+  const maxAttempts = liteOnly ? 1 : (isVideo ? GEMINI_MAX_VIDEO_ATTEMPTS_PER_MODEL : GEMINI_MAX_ATTEMPTS_PER_MODEL);
+  const retryDelays = isVideo ? GEMINI_VIDEO_RETRY_DELAYS_MS : GEMINI_RETRY_DELAYS_MS;
   const timeoutMs = isVideo ? GEMINI_VIDEO_GENERATE_TIMEOUT_MS : GEMINI_GENERATE_TIMEOUT_MS;
   const usesTools = requestUsesTools(requestBody);
   const geminiBody = usesTools ? withJsonOutputHint(requestBody) : requestBody;
@@ -732,7 +735,7 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
             break;
           }
           if (!liteOnly && isRetryableGeminiError(errMsg, status) && attempt < maxAttempts - 1) {
-            await sleep(GEMINI_RETRY_DELAYS_MS[attempt] ?? 900);
+            await sleep(retryDelays[attempt] ?? (isVideo ? 5000 : 900));
             continue;
           }
           break;
@@ -771,7 +774,7 @@ async function callGeminiForVideoAnalysis(requestBody, mode, fallbackCtx) {
   } catch (error) {
     if (!shouldUseTextFallback(error)) throw error;
     const reason = isRetryableGeminiError(String(error?.message || '')) ? 'overload' : 'timeout';
-    console.warn('[analyze] video Gemini failed, using text fallback:', reason, error?.message);
+    console.info('[analyze] video Gemini unavailable, degraded text analysis:', reason, error?.message);
     const data = await runTextFallbackGemini({ ...fallbackCtx, reason });
     return { data, degraded: true, degradationReason: reason };
   }
@@ -784,7 +787,7 @@ async function callGeminiWithTextFallback(requestBody, mode, fallbackCtx) {
   } catch (error) {
     if (!shouldUseTextFallback(error)) throw error;
     const reason = isRetryableGeminiError(String(error?.message || '')) ? 'overload' : 'timeout';
-    console.warn('[analyze] Gemini failed, using text fallback:', reason, error?.message);
+    console.info('[analyze] Gemini unavailable, degraded text analysis:', reason, error?.message);
     const data = await runTextFallbackGemini({ ...fallbackCtx, reason });
     return { data, degraded: true, degradationReason: reason };
   }
