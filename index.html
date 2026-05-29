@@ -2639,6 +2639,7 @@
                 pasteTextFirst: 'Paste your caption, transcript, or script first.',
                 localFileBlocked: 'Video upload is blocked from a local file page. Open the app from HTTPS/Telegram hosting, or test with a public YouTube link.',
                 analysisFailed: 'Analysis failed. Check the input and your API key, then try again.',
+                geminiOverloaded: 'Gemini is temporarily overloaded. Wait a moment and try again.',
                 analysisTimeout: 'The analysis took too long. Wait until the file shows ready, try a shorter clip (under 60s), or run again.',
                 analysisRetrying: 'Retrying analysis...',
                 retryAnalysis: 'Retry analysis',
@@ -2881,6 +2882,7 @@
                 pasteTextFirst: 'Сначала вставь caption, транскрипт или сценарий.',
                 localFileBlocked: 'Загрузка видео заблокирована со страницы file://. Открой приложение через HTTPS/Telegram hosting или протестируй публичную YouTube-ссылку.',
                 analysisFailed: 'Анализ не удался. Проверь входные данные и API key, затем попробуй снова.',
+                geminiOverloaded: 'Сервис Gemini временно перегружен. Подождите немного и попробуйте снова.',
                 analysisTimeout: 'Анализ занял слишком много времени. Дождись «Готово к анализу», попробуй ролик короче 60 с или запусти снова.',
                 analysisRetrying: 'Повторяем анализ...',
                 retryAnalysis: 'Повторить анализ',
@@ -3955,6 +3957,7 @@
 
         function extractErrorCode(err) {
             const msg = String(err?.message || err || '').toLowerCase();
+            if (/high demand|overloaded|temporarily overloaded|try again later/i.test(msg)) return 'gemini_overloaded';
             if (/timeout|timed out/i.test(msg)) return 'timeout';
             if (/fetch|network/i.test(msg)) return 'network';
             if (/quota|limit/i.test(msg)) return 'quota';
@@ -7853,6 +7856,8 @@
                 const isLocalFileUpload = state.currentSourceType === 'video-file' && window.location.protocol === 'file:';
                 if (isLocalFileUpload && String(err?.message || '').includes('Failed to fetch')) {
                     mainError.textContent = t('localFileBlocked');
+                } else if (extractErrorCode(err) === 'gemini_overloaded') {
+                    mainError.textContent = t('geminiOverloaded');
                 } else {
                     mainError.textContent = err?.message || t('analysisFailed');
                 }

@@ -55,6 +55,24 @@ function isUnavailableModelError(message) {
   return /no longer available|not found|deprecated|does not exist|is not supported|404/.test(text);
 }
 
+function isRetryableGeminiError(message, status) {
+  const text = String(message || '').toLowerCase();
+  const code = Number(status);
+  if ([429, 500, 503, 529].includes(code)) return true;
+  return /high demand|overloaded|resource exhausted|rate limit|too many requests|try again later|temporarily unavailable|service unavailable|quota exceeded|capacity/.test(text);
+}
+
+function userFacingGeminiError(error) {
+  const msg = String(error?.message || error || '');
+  if (isRetryableGeminiError(msg)) {
+    return 'Gemini is temporarily overloaded. Please wait a moment and try again.';
+  }
+  return msg || 'Analysis failed.';
+}
+
+const GEMINI_RETRY_DELAYS_MS = [1500, 3500, 7000];
+const GEMINI_MAX_ATTEMPTS_PER_MODEL = 3;
+
 function requestUsesTools(requestBody) {
   return Array.isArray(requestBody?.tools) && requestBody.tools.length > 0;
 }
@@ -640,42 +658,59 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
   const geminiBody = usesTools ? withJsonOutputHint(requestBody) : requestBody;
   let lastError = null;
   for (const model of models) {
+    let skipModel = false;
     for (const tokenCap of (maxOutputTokens >= 4096 ? [maxOutputTokens] : [maxOutputTokens, 4096])) {
-    try {
-      const generationConfig = buildGenerationConfig({
-        temperature,
-        topP: 0.92,
-        maxOutputTokens: tokenCap,
-        usesTools
-      });
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(timeoutMs),
-        body: JSON.stringify({
-          ...geminiBody,
-          generationConfig
-        })
-      });
-      if (response.ok) {
-        const data = await response.json();
-        const finishReason = data?.candidates?.[0]?.finishReason;
-        if (finishReason === 'MAX_TOKENS' && tokenCap < 4096) {
-          lastError = new Error(`Model ${model} response was cut off.`);
-          continue;
+      if (skipModel) break;
+      for (let attempt = 0; attempt < GEMINI_MAX_ATTEMPTS_PER_MODEL; attempt += 1) {
+        try {
+          const generationConfig = buildGenerationConfig({
+            temperature,
+            topP: 0.92,
+            maxOutputTokens: tokenCap,
+            usesTools
+          });
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: AbortSignal.timeout(timeoutMs),
+            body: JSON.stringify({
+              ...geminiBody,
+              generationConfig
+            })
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const finishReason = data?.candidates?.[0]?.finishReason;
+            if (finishReason === 'MAX_TOKENS' && tokenCap < 4096) {
+              lastError = new Error(`Model ${model} response was cut off.`);
+              break;
+            }
+            return data;
+          }
+          const status = response.status;
+          const errMsg = await getApiError(response, `Model ${model} failed: ${status}`);
+          lastError = new Error(errMsg);
+          if (isUnavailableModelError(errMsg)) {
+            skipModel = true;
+            break;
+          }
+          if (isRetryableGeminiError(errMsg, status) && attempt < GEMINI_MAX_ATTEMPTS_PER_MODEL - 1) {
+            await sleep(GEMINI_RETRY_DELAYS_MS[attempt] ?? 7000);
+            continue;
+          }
+          break;
+        } catch (error) {
+          if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+            lastError = new Error(`Model ${model} timed out after ${Math.round(timeoutMs / 1000)}s.`);
+            break;
+          }
+          throw error;
         }
-        return data;
       }
-      lastError = new Error(await getApiError(response, `Model ${model} failed: ${response.status}`));
-      if (isUnavailableModelError(lastError.message)) continue;
-    } catch (error) {
-      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        lastError = new Error(`Model ${model} timed out after ${Math.round(timeoutMs / 1000)}s.`);
-        continue;
-      }
-      throw error;
     }
-    }
+  }
+  if (lastError && isRetryableGeminiError(lastError.message)) {
+    throw new Error(userFacingGeminiError(lastError));
   }
   throw lastError || new Error('All Gemini models failed.');
 }
@@ -1733,6 +1768,9 @@ export default async function handler(req, res) {
     return sendText(res, 404, 'Not found');
   } catch (error) {
     console.error(error);
-    return sendJson(res, error?.statusCode || 500, { error: error?.message || 'Internal server error' });
+    const message = userFacingGeminiError(error);
+    const statusCode = error?.statusCode
+      || (isRetryableGeminiError(message) ? 503 : 500);
+    return sendJson(res, statusCode, { error: message });
   }
 }
