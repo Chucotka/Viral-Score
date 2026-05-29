@@ -7855,9 +7855,9 @@
             try {
                 let parsed = null;
                 let usedBackend = false;
+                let backendResponse = null;
                 const analysisId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
                 if (state.backendUrl) {
-                    let backendResponse;
                     try {
                         backendResponse = await callAnalysisBackend(analysisId);
                     } catch (firstErr) {
