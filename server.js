@@ -12,6 +12,10 @@ import {
   getStoreBackend
 } from './lib/client-store.js';
 import { assertRateLimit } from './lib/rate-limit.js';
+import {
+  hasPremiumAccess,
+  shouldBillFreeAnalysis
+} from './lib/developer-access.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,8 +31,8 @@ const UNLOCK_SECRET = process.env.UNLOCK_SECRET || '';
 const INDEX_PATH = path.join(__dirname, 'index.html');
 const CONTRACT_PATH = path.join(__dirname, 'BACKEND_CONTRACT.md');
 const STATE_PATH = path.join(__dirname, 'server-state.json');
-const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
-const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+const MODEL_CANDIDATES = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+const MODEL_CANDIDATES_VIDEO = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest', 'gemini-2.5-pro'];
 
 function isUnavailableModelError(message) {
   const text = String(message || '').toLowerCase();
@@ -650,7 +654,7 @@ async function analyzeMultipart(formData) {
     await assertRateLimit(clientId, 'analyze');
   }
   client.lastSeenAt = new Date().toISOString();
-  if (!client.accessUnlocked && freeLimit > 0 && client.usageCount >= freeLimit) {
+  if (!hasPremiumAccess(client, clientId) && freeLimit > 0 && client.usageCount >= freeLimit) {
     const error = new Error('Free quota ended.');
     error.statusCode = 402;
     throw error;
@@ -762,7 +766,9 @@ async function analyzeMultipart(formData) {
       throw parseError;
     }
   }
-  client.usageCount += 1;
+  if (shouldBillFreeAnalysis(client, clientId)) {
+    client.usageCount += 1;
+  }
   client.lastAnalysis = {
     id: analysisId || new Date().toISOString(),
     createdAt: new Date().toISOString(),
@@ -798,7 +804,7 @@ async function analyzeMultipart(formData) {
   return {
     result,
     usageCount: client.usageCount,
-    accessUnlocked: client.accessUnlocked,
+    accessUnlocked: hasPremiumAccess(client, clientId),
     freeLimit
   };
 }
@@ -810,19 +816,20 @@ async function getClientStatus(clientId) {
   return {
     clientId: normalizeClientId(clientId),
     usageCount: client.usageCount,
-    accessUnlocked: client.accessUnlocked,
+    accessUnlocked: hasPremiumAccess(client, clientId),
     lastSeenAt: client.lastSeenAt,
     lastAnalysis: client.lastAnalysis || null
   };
 }
 
-async function unlockClientAccess(clientId, method = 'stars') {
+async function unlockClientAccess(clientId, method = 'stars', options = {}) {
   const useKv = isKvConfigured();
   const serverState = useKv ? null : await loadServerState();
   const client = useKv
     ? await ensureClientRecord(clientId)
     : getClientRecord(serverState, clientId);
   client.accessUnlocked = true;
+  if (options.resetUsage) client.usageCount = 0;
   client.lastPaymentMethod = method;
   client.lastSeenAt = new Date().toISOString();
   if (useKv) {
@@ -1018,7 +1025,9 @@ const server = http.createServer(async (req, res) => {
       if (!clientId) {
         return sendJson(res, 400, { error: 'clientId is required.' });
       }
-      return sendJson(res, 200, await unlockClientAccess(clientId, body?.method));
+      return sendJson(res, 200, await unlockClientAccess(clientId, body?.method, {
+        resetUsage: Boolean(body?.resetUsage)
+      }));
     }
     if (req.method === 'POST' && url.pathname === '/api/telegram-webhook') {
       const request = new Request(url.toString(), {

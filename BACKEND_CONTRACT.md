@@ -73,8 +73,25 @@ Unlock access (server-side only — requires `UNLOCK_SECRET`):
 ```txt
 POST /api/unlock
 Header: X-Unlock-Secret: <UNLOCK_SECRET>
-Body: { "clientId": "...", "method": "card", "unlockSecret": "<UNLOCK_SECRET>" }
+Body: {
+  "clientId": "...",
+  "method": "card",
+  "unlockSecret": "<UNLOCK_SECRET>",
+  "resetUsage": true
+}
 ```
+
+`resetUsage: true` clears `usageCount` for that client (useful after testing). Never expose `UNLOCK_SECRET` in the frontend.
+
+Developer allowlist (no UI, env on Vercel only):
+
+```txt
+DEVELOPER_CLIENT_IDS=your_client_id_from_localStorage,another_id
+```
+
+Those IDs get unlimited analyses and premium flags via `/api/status`, but the allowlist itself is never sent to browsers. Find your id in DevTools → Application → `viral_score_client_id_v1`, or `localStorage.getItem('viral_score_client_id_v1')`.
+
+Free quota billing: only non-degraded successful analyses increment `usageCount`. Degraded text fallbacks (overload / video failure) do not consume a free attempt.
 
 Telegram Stars unlocks via `POST /api/telegram-webhook` on `successful_payment` (no client call to `/api/unlock`).
 
