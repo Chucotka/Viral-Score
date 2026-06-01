@@ -149,6 +149,141 @@
             padding-bottom: 8px;
         }
 
+        .analysis-ask-card {
+            background: var(--bg-surface);
+            border-radius: 18px;
+            padding: 16px;
+            margin: 8px 0 20px;
+            border: 1px solid rgba(123, 47, 255, 0.12);
+        }
+
+        .analysis-ask-hint {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.45;
+            margin: 0 0 12px;
+        }
+
+        .analysis-ask-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .analysis-ask-chip {
+            border: 1px solid rgba(123, 47, 255, 0.25);
+            background: rgba(123, 47, 255, 0.08);
+            color: var(--text-main);
+            border-radius: 999px;
+            padding: 8px 12px;
+            font: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.15s;
+        }
+
+        .analysis-ask-chip:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        .analysis-ask-chip:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .analysis-ask-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 280px;
+            overflow-y: auto;
+            margin-bottom: 12px;
+            padding-right: 2px;
+        }
+
+        .analysis-ask-messages:empty {
+            display: none;
+        }
+
+        .analysis-ask-msg {
+            border-radius: 14px;
+            padding: 10px 12px;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .analysis-ask-msg.user {
+            align-self: flex-end;
+            max-width: 92%;
+            background: rgba(123, 47, 255, 0.18);
+            color: var(--text-main);
+        }
+
+        .analysis-ask-msg.assistant {
+            align-self: flex-start;
+            max-width: 100%;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-main);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+        }
+
+        .analysis-ask-msg.assistant.loading {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .analysis-ask-form {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+        }
+
+        .analysis-ask-form input {
+            flex: 1;
+            min-width: 0;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            color: var(--text-main);
+            font: inherit;
+            font-size: 14px;
+            padding: 12px 14px;
+        }
+
+        .analysis-ask-form input:focus {
+            outline: none;
+            border-color: rgba(123, 47, 255, 0.45);
+        }
+
+        .analysis-ask-send {
+            flex-shrink: 0;
+            border: none;
+            border-radius: 12px;
+            background: var(--accent);
+            color: #fff;
+            font: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 12px 14px;
+            cursor: pointer;
+        }
+
+        .analysis-ask-send:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .analysis-ask-limit {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            text-align: right;
+        }
+
         .icon-btn {
             background: none;
             border: none;
@@ -2150,6 +2285,18 @@
                 <div class="premium-insights-grid" id="premium-insights-grid"></div>
             </div>
 
+            <div class="analysis-ask-card fade-in-up" id="analysis-ask-card" style="animation-delay: 1180ms;">
+                <div class="section-title" style="margin-bottom: 6px;" data-i18n="analysisAskTitle">Ask about this content</div>
+                <p class="analysis-ask-hint" data-i18n="analysisAskHint">Questions only about this analysis — voiceover, hook, caption, thumbnail, hashtags, and edits.</p>
+                <div class="analysis-ask-chips" id="analysis-ask-chips" role="group" aria-label="Suggested questions"></div>
+                <div class="analysis-ask-messages" id="analysis-ask-messages" aria-live="polite"></div>
+                <form class="analysis-ask-form" id="analysis-ask-form">
+                    <input type="text" id="analysis-ask-input" maxlength="600" autocomplete="off" data-i18n-placeholder="analysisAskPlaceholder" placeholder="e.g. Write a 15s voiceover script">
+                    <button type="submit" class="analysis-ask-send" id="analysis-ask-send-btn" data-i18n="analysisAskSend">Ask</button>
+                </form>
+                <div class="analysis-ask-limit" id="analysis-ask-limit" aria-hidden="true"></div>
+            </div>
+
             <div class="section-title fade-in-up" style="animation-delay: 1200ms;" data-i18n="recentAnalyses">Recent Analyses</div>
             <div class="history-list" id="results-history-list"></div>
 
@@ -2401,6 +2548,21 @@
         const improvedHookText = document.getElementById('improved-hook-text');
         const improvedCaptionText = document.getElementById('improved-caption-text');
         const improvedCtaText = document.getElementById('improved-cta-text');
+        const analysisAskCard = document.getElementById('analysis-ask-card');
+        const analysisAskChips = document.getElementById('analysis-ask-chips');
+        const analysisAskMessages = document.getElementById('analysis-ask-messages');
+        const analysisAskForm = document.getElementById('analysis-ask-form');
+        const analysisAskInput = document.getElementById('analysis-ask-input');
+        const analysisAskSendBtn = document.getElementById('analysis-ask-send-btn');
+        const analysisAskLimitEl = document.getElementById('analysis-ask-limit');
+        const ANALYSIS_ASK_MAX_TURNS = 10;
+        const ANALYSIS_ASK_CHIP_KEYS = [
+            'analysisAskChipVoiceover',
+            'analysisAskChipThumbnail',
+            'analysisAskChipFirst3s',
+            'analysisAskChipHashtags',
+            'analysisAskChipHook'
+        ];
         const copyHookBtn = document.getElementById('copy-hook-btn');
         const copyCaptionBtn = document.getElementById('copy-caption-btn');
         const copyCtaBtn = document.getElementById('copy-cta-btn');
@@ -2535,6 +2697,25 @@
                 copyHook: 'Copy hook',
                 copyCaption: 'Copy caption',
                 copyCta: 'Copy CTA',
+                analysisAskTitle: 'Ask about this content',
+                analysisAskHint: 'Questions only about this analysis — voiceover, hook, caption, thumbnail, hashtags, and edits. Not a general chat.',
+                analysisAskPlaceholder: 'e.g. Write a 15s voiceover script',
+                analysisAskSend: 'Ask',
+                analysisAskThinking: 'Thinking…',
+                analysisAskLimit: (left) => `${left} questions left for this report`,
+                analysisAskLimitReached: 'Question limit reached for this report. Start a new analysis to ask more.',
+                analysisAskFailed: 'Could not get an answer. Try again.',
+                analysisAskNoBackend: 'Connect the analysis backend to use Q&A.',
+                analysisAskChipVoiceover: 'Voiceover script',
+                analysisAskChipVoiceoverQ: 'Write a ready-to-film voiceover script for this video (15–30 seconds).',
+                analysisAskChipThumbnail: 'Thumbnail / cover',
+                analysisAskChipThumbnailQ: 'Suggest 3 thumbnail titles and what to show on the cover for higher CTR.',
+                analysisAskChipFirst3s: 'First 3 seconds',
+                analysisAskChipFirst3sQ: 'How should I rewrite the first 3 seconds to improve retention?',
+                analysisAskChipHashtags: 'Hashtags',
+                analysisAskChipHashtagsQ: 'Suggest hashtags for this content on the chosen platform.',
+                analysisAskChipHook: 'Shorter hook',
+                analysisAskChipHookQ: 'Give 3 shorter hook variants under 8 words each.',
                 copyReport: 'Copy Report',
                 downloadReport: 'Download Report',
                 analyzeAgain: 'Analyze Again',
@@ -2779,6 +2960,25 @@
                 copyHook: 'Копировать хук',
                 copyCaption: 'Копировать caption',
                 copyCta: 'Копировать CTA',
+                analysisAskTitle: 'Спросить про этот контент',
+                analysisAskHint: 'Только вопросы по этому разбору — закадровый текст, хук, caption, превью, хештеги, монтаж. Это не общий чат.',
+                analysisAskPlaceholder: 'например: напиши закадровый текст на 15 сек',
+                analysisAskSend: 'Спросить',
+                analysisAskThinking: 'Думаю…',
+                analysisAskLimit: (left) => `Осталось вопросов по этому отчёту: ${left}`,
+                analysisAskLimitReached: 'Лимит вопросов по этому отчёту исчерпан. Запусти новый анализ, чтобы спросить ещё.',
+                analysisAskFailed: 'Не удалось получить ответ. Попробуй ещё раз.',
+                analysisAskNoBackend: 'Подключи backend анализа, чтобы задавать вопросы.',
+                analysisAskChipVoiceover: 'Закадровый текст',
+                analysisAskChipVoiceoverQ: 'Напиши готовый закадровый текст под этот ролик (15–30 секунд), который можно сразу озвучить.',
+                analysisAskChipThumbnail: 'Превью / обложка',
+                analysisAskChipThumbnailQ: 'Предложи 3 варианта текста на превью и что показать на обложке для большего CTR.',
+                analysisAskChipFirst3s: 'Первые 3 секунды',
+                analysisAskChipFirst3sQ: 'Как переписать первые 3 секунды, чтобы улучшить удержание?',
+                analysisAskChipHashtags: 'Хештеги',
+                analysisAskChipHashtagsQ: 'Подбери хештеги для этого контента под выбранную платформу.',
+                analysisAskChipHook: 'Короче хук',
+                analysisAskChipHookQ: 'Дай 3 более коротких варианта хука — до 8 слов каждый.',
                 copyReport: 'Копировать отчёт',
                 downloadReport: 'Скачать отчёт',
                 analyzeAgain: 'Новый анализ',
@@ -3061,6 +3261,8 @@
             copy_hook_click: 'copy_hook_click',
             copy_caption_click: 'copy_caption_click',
             copy_cta_click: 'copy_cta_click',
+            analysis_ask_sent: 'analysis_ask_sent',
+            analysis_ask_failed: 'analysis_ask_failed',
             download_report_click: 'download_report_click',
             telegram_open_click: 'telegram_open_click',
             experiment_assigned: 'experiment_assigned'
@@ -4318,6 +4520,12 @@
             lastAnalysisResult: null,
             lastAnalysisMeta: null,
             analysisTranslations: {},
+            analysisAsk: {
+                analysisId: null,
+                messages: [],
+                pending: false,
+                turnsUsed: 0
+            },
             botLinkType: safeStorage.getItem(STORAGE_KEYS.botLinkType) || 'miniapp',
             history: loadHistory()
         };
@@ -4370,6 +4578,10 @@
             languageButtons.forEach(button => button.classList.toggle('active', button.dataset.lang === state.lang));
             document.querySelectorAll('[data-i18n]').forEach(element => {
                 element.textContent = t(element.dataset.i18n);
+            });
+            document.querySelectorAll('[data-i18n-placeholder]').forEach(element => {
+                const key = element.getAttribute('data-i18n-placeholder');
+                if (key) element.placeholder = t(key);
             });
             refreshMonetizationHints();
             updateLinkPreview();
@@ -7226,6 +7438,188 @@
             el.style.animation = '';
         }
 
+        function getAnalysisAskQuestionKey(chipKey) {
+            return `${chipKey}Q`;
+        }
+
+        function resetAnalysisAskSession(analysisId) {
+            const id = analysisId || state.lastAnalysisMeta?.id || 'last';
+            if (state.analysisAsk.analysisId === id) return;
+            state.analysisAsk = {
+                analysisId: id,
+                messages: [],
+                pending: false,
+                turnsUsed: 0
+            };
+        }
+
+        function getAnalysisAskTurnsLeft() {
+            return Math.max(0, ANALYSIS_ASK_MAX_TURNS - (state.analysisAsk.turnsUsed || 0));
+        }
+
+        function updateAnalysisAskLimitLabel() {
+            if (!analysisAskLimitEl) return;
+            const left = getAnalysisAskTurnsLeft();
+            if (left <= 0) {
+                analysisAskLimitEl.textContent = t('analysisAskLimitReached');
+                analysisAskLimitEl.removeAttribute('aria-hidden');
+            } else {
+                analysisAskLimitEl.textContent = t('analysisAskLimit', left);
+                analysisAskLimitEl.removeAttribute('aria-hidden');
+            }
+        }
+
+        function setAnalysisAskBusy(busy) {
+            state.analysisAsk.pending = busy;
+            if (analysisAskInput) analysisAskInput.disabled = busy || getAnalysisAskTurnsLeft() <= 0;
+            if (analysisAskSendBtn) {
+                analysisAskSendBtn.disabled = busy || getAnalysisAskTurnsLeft() <= 0;
+                analysisAskSendBtn.textContent = busy ? t('analysisAskThinking') : t('analysisAskSend');
+            }
+            if (analysisAskChips) {
+                analysisAskChips.querySelectorAll('.analysis-ask-chip').forEach(btn => {
+                    btn.disabled = busy || getAnalysisAskTurnsLeft() <= 0;
+                });
+            }
+        }
+
+        function renderAnalysisAskMessages() {
+            if (!analysisAskMessages) return;
+            analysisAskMessages.innerHTML = '';
+            for (const msg of state.analysisAsk.messages) {
+                const el = document.createElement('div');
+                el.className = `analysis-ask-msg ${msg.role === 'user' ? 'user' : 'assistant'}`;
+                el.textContent = msg.text;
+                analysisAskMessages.appendChild(el);
+            }
+            analysisAskMessages.scrollTop = analysisAskMessages.scrollHeight;
+        }
+
+        function renderAnalysisAskChips() {
+            if (!analysisAskChips) return;
+            analysisAskChips.innerHTML = '';
+            const disabled = state.analysisAsk.pending || getAnalysisAskTurnsLeft() <= 0;
+            for (const chipKey of ANALYSIS_ASK_CHIP_KEYS) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'analysis-ask-chip';
+                btn.textContent = t(chipKey);
+                btn.disabled = disabled;
+                btn.addEventListener('click', () => {
+                    const q = t(getAnalysisAskQuestionKey(chipKey));
+                    if (analysisAskInput) analysisAskInput.value = q;
+                    submitAnalysisAsk(q);
+                });
+                analysisAskChips.appendChild(btn);
+            }
+        }
+
+        function initAnalysisAskUi(meta = state.lastAnalysisMeta || {}) {
+            if (!analysisAskCard || !state.lastAnalysisResult) {
+                if (analysisAskCard) analysisAskCard.classList.add('hidden');
+                return;
+            }
+            analysisAskCard.classList.remove('hidden');
+            resetAnalysisAskSession(meta.id);
+            renderAnalysisAskChips();
+            renderAnalysisAskMessages();
+            updateAnalysisAskLimitLabel();
+            setAnalysisAskBusy(state.analysisAsk.pending);
+            if (analysisAskInput && !state.analysisAsk.pending) {
+                analysisAskInput.placeholder = t('analysisAskPlaceholder');
+            }
+        }
+
+        async function submitAnalysisAsk(questionText) {
+            const question = String(questionText || analysisAskInput?.value || '').trim();
+            if (!question || state.analysisAsk.pending) return;
+            if (!state.lastAnalysisResult) return;
+            if (getAnalysisAskTurnsLeft() <= 0) {
+                updateAnalysisAskLimitLabel();
+                return;
+            }
+            const askUrl = getBackendEndpointUrl('/api/ask-analysis');
+            if (!askUrl) {
+                const errMsg = document.createElement('div');
+                errMsg.className = 'analysis-ask-msg assistant';
+                errMsg.textContent = t('analysisAskNoBackend');
+                analysisAskMessages?.appendChild(errMsg);
+                return;
+            }
+            state.analysisAsk.messages.push({ role: 'user', text: question });
+            state.analysisAsk.turnsUsed += 1;
+            if (analysisAskInput) analysisAskInput.value = '';
+            renderAnalysisAskMessages();
+            setAnalysisAskBusy(true);
+            updateAnalysisAskLimitLabel();
+
+            const loadingEl = document.createElement('div');
+            loadingEl.className = 'analysis-ask-msg assistant loading';
+            loadingEl.textContent = t('analysisAskThinking');
+            analysisAskMessages?.appendChild(loadingEl);
+            analysisAskMessages.scrollTop = analysisAskMessages.scrollHeight;
+
+            const history = state.analysisAsk.messages.slice(0, -1).map(m => ({
+                role: m.role === 'user' ? 'user' : 'assistant',
+                text: m.text
+            }));
+
+            try {
+                const response = await fetch(askUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question,
+                        result: state.lastAnalysisResult,
+                        meta: state.lastAnalysisMeta || {},
+                        language: state.lang,
+                        history
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(await getApiError(response, t('analysisAskFailed')));
+                }
+                const data = await response.json();
+                const answer = String(data.answer || '').trim();
+                if (!answer) throw new Error(t('analysisAskFailed'));
+                state.analysisAsk.messages.push({ role: 'assistant', text: answer });
+                trackEvent(ANALYTICS_EVENTS.analysis_ask_sent, {
+                    source: 'result_screen',
+                    turns_used: state.analysisAsk.turnsUsed,
+                    question_length: question.length
+                });
+                if (tg && tg.HapticFeedback) {
+                    tg.HapticFeedback.notificationOccurred('success');
+                }
+            } catch (err) {
+                console.error(err);
+                state.analysisAsk.turnsUsed = Math.max(0, state.analysisAsk.turnsUsed - 1);
+                state.analysisAsk.messages.push({
+                    role: 'assistant',
+                    text: String(err?.message || t('analysisAskFailed'))
+                });
+                trackEvent(ANALYTICS_EVENTS.analysis_ask_failed, {
+                    source: 'result_screen',
+                    error_message: String(err?.message || err).slice(0, 200)
+                });
+            } finally {
+                loadingEl.remove();
+                renderAnalysisAskMessages();
+                setAnalysisAskBusy(false);
+                updateAnalysisAskLimitLabel();
+                renderAnalysisAskChips();
+            }
+        }
+
+        function wireAnalysisAsk() {
+            if (!analysisAskForm || analysisAskForm.dataset.wired === '1') return;
+            analysisAskForm.dataset.wired = '1';
+            analysisAskForm.addEventListener('submit', (event) => {
+                event.preventDefault();
+                submitAnalysisAsk();
+            });
+        }
+
         function renderResults(data, meta = state.lastAnalysisMeta || {}) {
             [
                 document.getElementById('analysis-summary-card'),
@@ -7299,6 +7693,8 @@
 
             syncResultsPremiumState();
             renderPremiumInsightsTeaser(data, meta);
+            initAnalysisAskUi(meta);
+            wireAnalysisAsk();
 
             if (tg && tg.MainButton) {
                 tg.MainButton.offClick(copyPrimaryAsset);

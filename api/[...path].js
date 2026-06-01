@@ -300,6 +300,108 @@ async function translateAnalysisResult(result, language) {
   return normalizeResult(parseModelJson(extractModelText(data)));
 }
 
+const ANALYSIS_ASK_MAX_QUESTION = 600;
+const ANALYSIS_ASK_MAX_HISTORY = 6;
+
+function compactAnalysisForAsk(result, meta = {}) {
+  return {
+    viral_score: result.viral_score,
+    scores: {
+      hook_strength: result.hook_strength,
+      retention_score: result.retention_score,
+      clarity_score: result.clarity_score,
+      shareability_score: result.shareability_score,
+      cta_score: result.cta_score,
+      platform_fit_score: result.platform_fit_score,
+      first_three_seconds_score: result.first_three_seconds_score
+    },
+    summary: result.summary,
+    insights: {
+      hook: result.hook_insight,
+      retention: result.retention_insight,
+      shareability: result.shareability_insight,
+      platform_fit: result.platform_fit_insight
+    },
+    strengths: result.strengths,
+    risks: result.risks,
+    suggestions: result.suggestions,
+    next_actions: result.next_actions,
+    improved_hook: result.improved_hook,
+    improved_caption: result.improved_caption,
+    improved_cta: result.improved_cta,
+    context: {
+      platform: meta.platform || '',
+      mode: meta.mode || '',
+      sourceType: meta.sourceType || '',
+      sourceLabel: meta.sourceLabel || '',
+      analysisDegraded: Boolean(meta.analysisDegraded)
+    }
+  };
+}
+
+function buildAnalysisAskSystemPrompt(language) {
+  const russian = language === 'ru';
+  return russian
+    ? [
+      'Ты помощник Viral Score после анализа контента.',
+      'Отвечай ТОЛЬКО на вопросы про этот конкретный ролик/пост и его разбор (хук, удержание, закадровый текст, caption, CTA, превью, хештеги, структура, монтаж, первые секунды).',
+      'Не веди общий чат, не отвечай на оффтоп (погода, код, другие темы). Если вопрос не про контент — вежливо откажи одной фразой и предложи переформулировать.',
+      'Давай готовые формулировки, которые можно сразу снять/вставить. Без markdown-заголовков. Коротко: 2–6 предложений или маркированный список до 5 пунктов.',
+      'Язык ответа: русский.'
+    ].join(' ')
+    : [
+      'You are the Viral Score assistant after a content analysis.',
+      'Answer ONLY questions about this specific piece of content and its report (hook, retention, voiceover script, caption, CTA, thumbnail, hashtags, structure, edit, opening seconds).',
+      'No general chat or off-topic answers. If the question is unrelated, politely refuse in one sentence and ask to rephrase.',
+      'Give ready-to-use copy the creator can film or paste. No markdown headings. Keep answers short: 2–6 sentences or up to 5 bullet points.',
+      'Reply in English.'
+    ].join(' ');
+}
+
+async function askAboutAnalysis({ question, result, meta, language, history }) {
+  const russian = language === 'ru';
+  const q = String(question || '').trim().slice(0, ANALYSIS_ASK_MAX_QUESTION);
+  if (q.length < 2) {
+    const error = new Error(russian ? 'Вопрос слишком короткий.' : 'Question is too short.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!result || typeof result !== 'object') {
+    const error = new Error(russian ? 'Нет результата анализа.' : 'Analysis result is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+  const normalized = normalizeResult(result);
+  const contextJson = JSON.stringify(compactAnalysisForAsk(normalized, meta || {}));
+  const system = buildAnalysisAskSystemPrompt(language);
+  const ack = russian
+    ? 'Понял. Отвечаю только по этому анализу контента.'
+    : 'Understood. I will only answer about this content analysis.';
+  const contents = [
+    {
+      role: 'user',
+      parts: [{ text: `${system}\n\n${russian ? 'Контекст анализа (JSON):' : 'Analysis context (JSON):'}\n${contextJson}` }]
+    },
+    { role: 'model', parts: [{ text: ack }] }
+  ];
+  const safeHistory = Array.isArray(history) ? history : [];
+  for (const item of safeHistory.slice(-ANALYSIS_ASK_MAX_HISTORY)) {
+    const role = item?.role === 'assistant' ? 'model' : 'user';
+    const text = String(item?.text || '').trim().slice(0, ANALYSIS_ASK_MAX_QUESTION);
+    if (!text) continue;
+    contents.push({ role, parts: [{ text }] });
+  }
+  contents.push({ role: 'user', parts: [{ text: q }] });
+  const data = await callGemini({ contents }, 'quick', { isVideo: false, liteOnly: true });
+  const answer = extractModelText(data).trim();
+  if (!answer) {
+    const error = new Error(russian ? 'Пустой ответ модели.' : 'Empty model response.');
+    error.statusCode = 502;
+    throw error;
+  }
+  return { answer, language: russian ? 'ru' : 'en' };
+}
+
 function isDirectVideoUrl(value) {
   try {
     const url = new URL(value);
@@ -1948,6 +2050,23 @@ export default async function handler(req, res) {
       }
       const translated = await translateAnalysisResult(normalizeResult(result), language);
       return sendJson(res, 200, { result: translated, language });
+    }
+
+    if (req.method === 'POST' && path === '/api/ask-analysis') {
+      if (!GEMINI_API_KEY) return sendJson(res, 500, { error: 'GEMINI_API_KEY is not configured.' });
+      const body = await readJson(req, url);
+      try {
+        const payload = await askAboutAnalysis({
+          question: body?.question,
+          result: body?.result,
+          meta: body?.meta || {},
+          language: body?.language,
+          history: body?.history
+        });
+        return sendJson(res, 200, payload);
+      } catch (askError) {
+        return sendJson(res, askError.statusCode || 500, { error: askError.message || 'ask-analysis failed' });
+      }
     }
 
     if (req.method === 'POST' && path === '/api/analyze') {

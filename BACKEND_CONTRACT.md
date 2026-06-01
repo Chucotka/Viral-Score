@@ -121,6 +121,16 @@ Telegram webhook:
 POST /api/telegram-webhook
 ```
 
+Contextual Q&A after analysis (not a general chat — only questions about the analyzed content):
+
+```txt
+POST /api/ask-analysis
+```
+
+JSON body: `question`, `result` (analysis JSON), optional `meta` (`platform`, `mode`, `sourceType`, …), `language` (`en`|`ru`), optional `history` (last turns: `{ role: "user"|"assistant", text }`).
+
+Response: `{ "answer": "...", "language": "en" }`.
+
 ## Request
 
 The frontend sends `multipart/form-data`.
