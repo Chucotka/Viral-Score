@@ -2297,12 +2297,7 @@
 
             <div class="section-title" style="margin-top: 20px;" data-i18n="monetizationTitle">Monetization</div>
             <div class="modal-desc" data-i18n="monetizationDesc">Use Telegram Stars for in-app digital access. Use Tribute for creator subscriptions or external support.</div>
-            <div class="pricing-presets">
-                <button type="button" class="preset-btn" data-plan-preset="starter" data-i18n="planStarter">Starter</button>
-                <button type="button" class="preset-btn" data-plan-preset="pro" data-i18n="planPro">Pro</button>
-                <button type="button" class="preset-btn" data-plan-preset="team" data-i18n="planTeam">Team</button>
-            </div>
-            <div class="source-note" id="pricing-hint" data-i18n="pricingHint">Suggested packs: Starter 499 Stars / $9, Pro 999 Stars / $19, Team 1999 Stars / $39. Use USD in English and RUB in Russian for the card checkout page.</div>
+            <div class="source-note" id="pricing-hint" data-i18n="pricingHint">Premium: 490 ₽/month or 350 Stars/month — all features included.</div>
 
             <div class="segmented" id="billing-mode-selector">
                 <button type="button" class="active" data-billing="stars" data-i18n="billingStars">Stars</button>
@@ -2483,7 +2478,6 @@
         const postInput = document.getElementById('post-input');
         const contextInput = document.getElementById('context-input');
         const pricingHint = document.getElementById('pricing-hint');
-        const pricingPresetButtons = document.querySelectorAll('[data-plan-preset]');
         const compareCard = document.getElementById('compare-card');
         const compareRow = document.getElementById('compare-row');
         const statGrid = document.getElementById('stat-grid');
@@ -2548,6 +2542,7 @@
             clientId: 'viral_score_client_id_v1',
             usageCount: 'viral_score_usage_count_v1',
             accessUnlocked: 'viral_score_access_unlocked_v1',
+            accessExpiresAt: 'viral_score_access_expires_v1',
             botLinkType: 'viral_score_bot_link_type_v1'
         };
 
@@ -2608,17 +2603,18 @@
                 telegramTitle: 'Built for Telegram',
                 telegramDesc: 'Full report, export, and upgrades run in the Telegram Mini App — pay with Telegram Stars in one tap.',
                 openInTelegram: 'Open in Telegram →',
-                paywallTitle: 'Unlock full report',
-                paywallDesc: 'You already saw your score. Export, copy all assets, and keep analyzing without limits.',
-                paywallCta: 'Unlock with Telegram Stars',
-                paywallTrust: 'Pay inside Telegram · no card required',
+                paywallTitle: 'Viral Score Premium',
+                paywallDesc: '490 ₽/month or 350 Stars/month — unlimited analyses, export, copy assets, and Q&A.',
+                paywallCta: 'Subscribe · 350 Stars/month',
+                paywallTrust: 'Monthly subscription · pay inside Telegram',
                 paywallFeature1: 'Full report download',
                 paywallFeature2: 'Copy hook, caption & CTA',
-                paywallFeature3: 'Unlimited analyses',
-                paywallAnalyzeLimit: 'Free analyses used. Unlock with Telegram Stars to continue.',
-                resultsPremiumTeaser: 'You saw your score. Unlock the full report, exports, and rewritten assets.',
+                paywallFeature3: 'Unlimited analyses + Q&A',
+                paywallAnalyzeLimit: 'Free analyses used. Subscribe for 350 Stars/month to continue.',
+                resultsPremiumTeaser: 'Premium: 490 ₽/month or 350 Stars — full report, export, and Q&A.',
                 quotaHintFree: (left, total) => `${left} of ${total} free analyses left`,
-                quotaHintUnlimited: 'Unlimited access active',
+                quotaHintUnlimited: 'Premium active',
+                quotaHintUntil: (date) => `Premium until ${date}`,
                 historyDemoTitle: 'Morning routine reel (demo)',
                 historyDemoHint: 'Tap the demo to preview a sample report — then run your own free analysis.',
                 appTitle: '⚡ Viral Score',
@@ -2710,13 +2706,13 @@
                 launchPaymentsAuto: 'Generating Stars invoice link…',
                 launchStarsReady: 'Stars invoice generator ready',
                 launchStarsMissing: 'Add BOT_TOKEN on the server to generate Stars invoice links.',
-                starsInvoiceTitle: 'Viral Score access',
-                starsInvoiceDescription: 'Unlock unlimited analyses in Viral Score.',
+                starsInvoiceTitle: 'Viral Score Premium',
+                starsInvoiceDescription: 'All features · 350 Stars/month subscription.',
                 starsInvoiceGenerated: 'Stars invoice link generated and saved.',
                 starsInvoiceFailed: 'Could not generate the Stars invoice link.',
                 starsTokenMissing: 'Add BOT_TOKEN on the server to generate Stars invoice links.',
                 starsPriceInvalid: 'Set a valid Stars price before generating the invoice link.',
-                pricingHint: 'Suggested packs: Starter 499 Stars / $9, Pro 999 Stars / $19, Team 1999 Stars / $39. Use USD in English and RUB in Russian for the card checkout page.',
+                pricingHint: 'Premium: 490 ₽/month or 350 Stars/month — all features. Set card checkout to 490 ₽/month if you use card payments.',
                 starsPayloadCopied: 'Stars payload copied.',
                 botLinkCopied: 'Bot link copied.',
                 linkPasted: 'Link pasted.',
@@ -2871,17 +2867,18 @@
                 telegramTitle: 'Сделано для Telegram',
                 telegramDesc: 'Полный отчёт, экспорт и апгрейды в Mini App — оплата Telegram Stars в один тап.',
                 openInTelegram: 'Открыть в Telegram →',
-                paywallTitle: 'Открыть полный отчёт',
-                paywallDesc: 'Ты уже видел score. Экспорт, копирование ассетов и безлимитные анализы.',
-                paywallCta: 'Разблокировать через Telegram Stars',
-                paywallTrust: 'Оплата в Telegram · без карты',
+                paywallTitle: 'Viral Score Premium',
+                paywallDesc: '490 ₽/мес или 350 Stars/мес — безлимитные анализы, экспорт, копирование и Q&A.',
+                paywallCta: 'Подписка · 350 Stars/мес',
+                paywallTrust: 'Ежемесячная подписка · оплата в Telegram',
                 paywallFeature1: 'Скачать полный отчёт',
                 paywallFeature2: 'Копировать hook, caption и CTA',
-                paywallFeature3: 'Безлимитные анализы',
-                paywallAnalyzeLimit: 'Бесплатные анализы закончились. Разблокируй через Telegram Stars.',
-                resultsPremiumTeaser: 'Ты видел score. Открой полный отчёт, экспорт и переписанные ассеты.',
+                paywallFeature3: 'Безлимит + Q&A после анализа',
+                paywallAnalyzeLimit: 'Бесплатные анализы закончились. Оформи подписку за 350 Stars/мес.',
+                resultsPremiumTeaser: 'Premium: 490 ₽/мес или 350 Stars — полный отчёт, экспорт и Q&A.',
                 quotaHintFree: (left, total) => `Осталось ${left} из ${total} бесплатных анализов`,
-                quotaHintUnlimited: 'Безлимитный доступ активен',
+                quotaHintUnlimited: 'Premium активен',
+                quotaHintUntil: (date) => `Premium до ${date}`,
                 historyDemoTitle: 'Утренняя рутина (демо)',
                 historyDemoHint: 'Нажми на демо, чтобы увидеть пример отчёта — затем запусти свой бесплатный анализ.',
                 appTitle: '⚡ Viral Score',
@@ -2973,13 +2970,13 @@
                 launchPaymentsAuto: 'Создаём ссылку Stars…',
                 launchStarsReady: 'Генератор Stars invoice готов',
                 launchStarsMissing: 'Добавь BOT_TOKEN на сервере, чтобы генерировать ссылки Stars.',
-                starsInvoiceTitle: 'Доступ к Viral Score',
-                starsInvoiceDescription: 'Разблокируй безлимитные анализы в Viral Score.',
+                starsInvoiceTitle: 'Viral Score Premium',
+                starsInvoiceDescription: 'Все функции · подписка 350 Stars/мес.',
                 starsInvoiceGenerated: 'Ссылка Stars создана и сохранена.',
                 starsInvoiceFailed: 'Не удалось создать ссылку Stars.',
                 starsTokenMissing: 'Добавь BOT_TOKEN на сервере, чтобы генерировать ссылки Stars.',
                 starsPriceInvalid: 'Укажи корректную цену в Stars перед генерацией ссылки.',
-                pricingHint: 'Рекомендуемые пакеты: Starter 499 Stars / 790 ₽, Pro 999 Stars / 1 490 ₽, Team 1 999 Stars / 3 490 ₽. Для английской версии используй USD, для русской — RUB на странице оплаты картой.',
+                pricingHint: 'Premium: 490 ₽/мес или 350 Stars/мес — все функции. Для оплаты картой укажи 490 ₽/мес на checkout-странице.',
                 starsPayloadCopied: 'Payload Stars скопирован.',
                 botLinkCopied: 'Ссылка бота скопирована.',
                 linkPasted: 'Ссылка вставлена.',
@@ -3081,6 +3078,8 @@
         };
 
         const MODEL_CANDIDATES = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-pro'];
+        const PREMIUM_RUB_MONTHLY = 490;
+        const PREMIUM_STARS_MONTHLY = 350;
         const DEFAULT_BACKEND_URL = window.location.protocol === 'file:'
             ? 'https://viral-score.vercel.app/api/analyze'
             : '/api/analyze';
@@ -4439,7 +4438,7 @@
             lang: safeStorage.getItem(STORAGE_KEYS.lang) || (navigator.language && navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'),
             billingMode: safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both',
             starsInvoiceUrl: safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '',
-            starsPrice: Number(safeStorage.getItem(STORAGE_KEYS.starsPrice) || '499'),
+            starsPrice: Number(safeStorage.getItem(STORAGE_KEYS.starsPrice) || String(PREMIUM_STARS_MONTHLY)),
             tributeUrl: safeStorage.getItem(STORAGE_KEYS.tributeUrl) || '',
             cardCheckoutUrl: safeStorage.getItem(STORAGE_KEYS.cardCheckoutUrl) || '',
             botUsername: safeStorage.getItem(STORAGE_KEYS.botUsername) || '',
@@ -4449,6 +4448,7 @@
             freeLimit: Number(safeStorage.getItem(STORAGE_KEYS.freeLimit) || '3'),
             usageCount: Number(safeStorage.getItem(STORAGE_KEYS.usageCount) || '0'),
             accessUnlocked: safeStorage.getItem(STORAGE_KEYS.accessUnlocked) === '1',
+            accessExpiresAt: safeStorage.getItem(STORAGE_KEYS.accessExpiresAt) || null,
             draft: {
                 sourceType: safeStorage.getItem(STORAGE_KEYS.draftSourceType) || '',
                 postUrl: safeStorage.getItem(STORAGE_KEYS.draftPostUrl) || '',
@@ -6360,11 +6360,44 @@
             refreshMonetizationHints();
         }
 
+        function formatPremiumExpiryDate(iso) {
+            if (!iso) return '';
+            try {
+                return new Date(iso).toLocaleDateString(state.lang === 'ru' ? 'ru-RU' : 'en-US', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                });
+            } catch {
+                return '';
+            }
+        }
+
+        function applyPremiumSyncFromServer(data) {
+            if (typeof data?.accessExpiresAt === 'string') {
+                state.accessExpiresAt = data.accessExpiresAt;
+                safeStorage.setItem(STORAGE_KEYS.accessExpiresAt, data.accessExpiresAt);
+            } else if (data?.accessExpiresAt === null) {
+                state.accessExpiresAt = null;
+                safeStorage.removeItem(STORAGE_KEYS.accessExpiresAt);
+            }
+            if (state.accessExpiresAt && new Date(state.accessExpiresAt).getTime() <= Date.now()) {
+                state.accessUnlocked = false;
+                safeStorage.setItem(STORAGE_KEYS.accessUnlocked, '0');
+                return;
+            }
+            if (typeof data?.accessUnlocked === 'boolean') {
+                state.accessUnlocked = data.accessUnlocked;
+                safeStorage.setItem(STORAGE_KEYS.accessUnlocked, data.accessUnlocked ? '1' : '0');
+            }
+        }
+
         /** PLG: quota microcopy under hero — not a paywall on the main screen. */
         function updateQuotaLabel() {
             if (!quotaHintEl) return;
             if (state.accessUnlocked) {
-                quotaHintEl.textContent = t('quotaHintUnlimited');
+                const until = formatPremiumExpiryDate(state.accessExpiresAt);
+                quotaHintEl.textContent = until ? t('quotaHintUntil', until) : t('quotaHintUnlimited');
                 quotaHintEl.classList.remove('hidden');
                 return;
             }
@@ -6638,15 +6671,15 @@
                 pricingHint.textContent = t('pricingHint');
             }
             const cardPlaceholder = state.lang === 'ru'
-                ? 'https://checkout.example.com/pay?amount=790&currency=RUB'
-                : 'https://checkout.example.com/pay?amount=9&currency=USD';
+                ? 'https://checkout.example.com/pay?amount=490&currency=RUB&period=month'
+                : 'https://checkout.example.com/pay?amount=9&currency=USD&period=month';
             const cardInput = document.getElementById('card-checkout-url-input');
             const starsInput = document.getElementById('stars-price-input');
             if (cardInput && !cardInput.value) {
                 cardInput.placeholder = cardPlaceholder;
             }
             if (starsInput && !starsInput.value) {
-                starsInput.placeholder = '499';
+                starsInput.placeholder = String(PREMIUM_STARS_MONTHLY);
             }
         }
 
@@ -6680,21 +6713,6 @@
                 linkPreview.classList.add('warn');
                 linkPreview.textContent = t('linkNotFound');
             }
-        }
-
-        function applyPricingPreset(plan) {
-            const presets = {
-                starter: 499,
-                pro: 999,
-                team: 1999
-            };
-            const stars = presets[plan];
-            if (!stars) return;
-            state.starsPrice = stars;
-            const starsInput = document.getElementById('stars-price-input');
-            if (starsInput) starsInput.value = String(stars);
-            setSettingsStatus(`${t('plan' + plan.charAt(0).toUpperCase() + plan.slice(1))} · ${stars} Stars`, 'ok');
-            saveMonetizationConfig();
         }
 
         function needsStarsInvoiceUrl() {
@@ -6947,11 +6965,9 @@
                     state.usageCount = data.usageCount;
                     safeStorage.setItem(STORAGE_KEYS.usageCount, String(state.usageCount));
                 }
-                if (typeof data.accessUnlocked === 'boolean') {
-                    state.accessUnlocked = data.accessUnlocked;
-                    safeStorage.setItem(STORAGE_KEYS.accessUnlocked, data.accessUnlocked ? '1' : '0');
-                }
+                applyPremiumSyncFromServer(data);
                 updateQuotaLabel();
+                syncResultsPremiumState();
             } catch {
                 // Silent fallback for local/offline runs.
             }
@@ -8150,8 +8166,7 @@
                         safeStorage.setItem(STORAGE_KEYS.usageCount, String(state.usageCount));
                     }
                     if (typeof backendResponse.accessUnlocked === 'boolean') {
-                        state.accessUnlocked = backendResponse.accessUnlocked;
-                        safeStorage.setItem(STORAGE_KEYS.accessUnlocked, backendResponse.accessUnlocked ? '1' : '0');
+                        applyPremiumSyncFromServer(backendResponse);
                     }
                     if (typeof backendResponse.freeLimit === 'number') {
                         state.freeLimit = backendResponse.freeLimit;
@@ -8352,10 +8367,6 @@
                     }
                 });
             }
-            pricingPresetButtons.forEach(button => {
-                button.addEventListener('click', () => applyPricingPreset(button.dataset.planPreset));
-            });
-
             chooseVideoBtn.addEventListener('click', () => videoFileInput.click());
             uploadDropzone.addEventListener('click', event => {
                 if (event.target === chooseVideoBtn) return;

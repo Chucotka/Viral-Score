@@ -21,6 +21,10 @@ const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '';
 const BLOB_READ_WRITE_TOKEN = process.env.BLOB_READ_WRITE_TOKEN || '';
 const UNLOCK_SECRET = process.env.UNLOCK_SECRET || '';
 const BOT_USERNAME = process.env.BOT_USERNAME || 'viral_score_bot';
+/** Telegram Stars subscription period: 30 days (Bot API subscription_period). */
+const STARS_SUBSCRIPTION_PERIOD_SEC = 2592000;
+const DEFAULT_STARS_MONTHLY_PRICE = Math.max(1, Number(process.env.STARS_MONTHLY_PRICE) || 350);
+const PREMIUM_ACCESS_DAYS = Math.max(1, Number(process.env.PREMIUM_ACCESS_DAYS) || 30);
 const VK_APP_ID = process.env.VK_APP_ID || '';
 const VK_APP_SECRET = process.env.VK_APP_SECRET || '';
 
@@ -1335,6 +1339,7 @@ async function analyzeMultipart(formData) {
     result,
     usageCount: client.usageCount,
     accessUnlocked: hasPremiumAccess(client, clientId),
+    accessExpiresAt: client.accessExpiresAt || null,
     freeLimit,
     analysisDegraded,
     degradationReason: geminiResult.degradationReason || null
@@ -1347,6 +1352,7 @@ async function getClientStatus(clientId) {
     clientId: normalizeClientId(clientId),
     usageCount: client?.usageCount || 0,
     accessUnlocked: hasPremiumAccess(client, clientId),
+    accessExpiresAt: client?.accessExpiresAt || null,
     lastSeenAt: client?.lastSeenAt || null,
     lastAnalysis: client?.lastAnalysis || null
   };
@@ -1373,10 +1379,20 @@ async function unlockClientAccess(clientId, method = 'stars', options = {}) {
   if (options.resetUsage) client.usageCount = 0;
   client.lastPaymentMethod = method;
   client.lastSeenAt = new Date().toISOString();
+  if (options.lifetime) {
+    client.accessExpiresAt = null;
+  } else {
+    const days = Math.max(1, Number(options.accessDays) || PREMIUM_ACCESS_DAYS);
+    const nowMs = Date.now();
+    const currentMs = client.accessExpiresAt ? new Date(client.accessExpiresAt).getTime() : 0;
+    const baseMs = Math.max(nowMs, Number.isFinite(currentMs) ? currentMs : 0);
+    client.accessExpiresAt = new Date(baseMs + days * 86400000).toISOString();
+  }
   await saveClient(client);
   return {
     clientId: normalizeClientId(clientId),
     accessUnlocked: true,
+    accessExpiresAt: client.accessExpiresAt,
     usageCount: client.usageCount,
     lastPaymentMethod: method
   };
@@ -1402,9 +1418,10 @@ async function createStarsInvoiceLink({ clientId, title, description, stars }) {
     error.statusCode = 400;
     throw error;
   }
-  const amount = Math.max(1, Math.min(25000, Math.round(Number(stars) || 0)));
-  const invoiceTitle = String(title || 'Viral Score access').trim().slice(0, 32) || 'Viral Score access';
-  const invoiceDescription = String(description || 'Unlock unlimited analyses in Viral Score.').trim().slice(0, 255) || 'Unlock unlimited analyses in Viral Score.';
+  const amount = Math.max(1, Math.min(25000, Math.round(Number(stars) || DEFAULT_STARS_MONTHLY_PRICE)));
+  const invoiceTitle = String(title || 'Viral Score Premium').trim().slice(0, 32) || 'Viral Score Premium';
+  const invoiceDescription = String(description || 'All features · billed monthly via Telegram Stars.').trim().slice(0, 255)
+    || 'All features · billed monthly via Telegram Stars.';
   const payload = buildPaymentPayload(normalizedClientId, 'stars');
   const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createInvoiceLink`, {
     method: 'POST',
@@ -1415,7 +1432,8 @@ async function createStarsInvoiceLink({ clientId, title, description, stars }) {
       payload,
       provider_token: '',
       currency: 'XTR',
-      prices: [{ label: 'Access', amount }]
+      prices: [{ label: 'Monthly', amount }],
+      subscription_period: STARS_SUBSCRIPTION_PERIOD_SEC
     })
   });
   const data = await response.json().catch(() => ({}));
@@ -1429,7 +1447,8 @@ async function createStarsInvoiceLink({ clientId, title, description, stars }) {
     method: 'stars',
     invoiceLink: data.result,
     payload,
-    stars: amount
+    stars: amount,
+    subscriptionPeriodDays: PREMIUM_ACCESS_DAYS
   };
 }
 
@@ -1458,11 +1477,11 @@ async function handleTelegramUpdate(update) {
   if (payment) {
     const clientId = extractClientIdFromPayload(payment.invoice_payload);
     if (!clientId) return { ok: false, error: 'Missing client payload in successful payment.' };
-    const unlocked = await unlockClientAccess(clientId, 'stars');
+    const unlocked = await unlockClientAccess(clientId, 'stars', { accessDays: PREMIUM_ACCESS_DAYS });
     const chatId = update?.message?.chat?.id;
     if (chatId) {
       await sendTgMessage(chatId,
-        '✅ Оплата получена! Премиум-доступ разблокирован. Вернись в приложение — все функции уже открыты.'
+        `✅ Подписка активна на ${PREMIUM_ACCESS_DAYS} дней! Все функции Viral Score открыты — вернись в приложение.`
       ).catch(() => {});
     }
     return { ok: true, handled: true, ...unlocked };
@@ -2027,7 +2046,9 @@ export default async function handler(req, res) {
       const clientId = normalizeClientId(body?.clientId);
       if (!clientId) return sendJson(res, 400, { error: 'clientId is required.' });
       return sendJson(res, 200, await unlockClientAccess(clientId, body?.method, {
-        resetUsage: Boolean(body?.resetUsage)
+        resetUsage: Boolean(body?.resetUsage),
+        lifetime: Boolean(body?.lifetime),
+        accessDays: Number(body?.accessDays) || PREMIUM_ACCESS_DAYS
       }));
     }
 
