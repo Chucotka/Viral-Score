@@ -13,6 +13,7 @@ import {
   hasPremiumAccess,
   shouldBillFreeAnalysis
 } from '../lib/developer-access.js';
+import { handleTributeWebhookRequest } from '../lib/tribute-webhook.js';
 
 export const maxDuration = 300;
 
@@ -2062,6 +2063,15 @@ export default async function handler(req, res) {
       }
       const update = await readJson(req, url);
       return sendJson(res, 200, await handleTelegramUpdate(update));
+    }
+
+    if (req.method === 'GET' && path === '/api/tribute-webhook') {
+      return sendJson(res, 200, { ok: true, endpoint: 'tribute-webhook' });
+    }
+
+    if (req.method === 'POST' && path === '/api/tribute-webhook') {
+      const rawBody = await readRawBody(req);
+      return sendJson(res, 200, await handleTributeWebhookRequest(req, rawBody));
     }
 
         if (req.method === 'POST' && path === '/api/generate') {
