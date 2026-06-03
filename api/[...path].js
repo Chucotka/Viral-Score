@@ -121,9 +121,9 @@ function withJsonOutputHint(requestBody) {
   return body;
 }
 
-function buildGenerationConfig({ temperature, topP, maxOutputTokens, usesTools }) {
+function buildGenerationConfig({ temperature, topP, maxOutputTokens, usesTools, plainText }) {
   const generationConfig = { temperature, topP, maxOutputTokens };
-  if (!usesTools) {
+  if (!usesTools && !plainText) {
     generationConfig.responseMimeType = 'application/json';
     generationConfig.responseSchema = ANALYSIS_SCHEMA;
   }
@@ -372,27 +372,37 @@ async function askAboutAnalysis({ question, result, meta, language, history }) {
     throw error;
   }
   const normalized = normalizeResult(result);
-  const contextJson = JSON.stringify(compactAnalysisForAsk(normalized, meta || {}));
+  const contextJson = JSON.stringify(compactAnalysisForAsk(normalized, meta || {}), null, 2);
   const system = buildAnalysisAskSystemPrompt(language);
-  const ack = russian
-    ? 'Понял. Отвечаю только по этому анализу контента.'
-    : 'Understood. I will only answer about this content analysis.';
-  const contents = [
-    {
-      role: 'user',
-      parts: [{ text: `${system}\n\n${russian ? 'Контекст анализа (JSON):' : 'Analysis context (JSON):'}\n${contextJson}` }]
-    },
-    { role: 'model', parts: [{ text: ack }] }
-  ];
   const safeHistory = Array.isArray(history) ? history : [];
-  for (const item of safeHistory.slice(-ANALYSIS_ASK_MAX_HISTORY)) {
-    const role = item?.role === 'assistant' ? 'model' : 'user';
+  const historyLines = safeHistory.slice(-ANALYSIS_ASK_MAX_HISTORY).map((item) => {
+    const speaker = item?.role === 'assistant'
+      ? (russian ? 'Ассистент' : 'Assistant')
+      : (russian ? 'Пользователь' : 'User');
     const text = String(item?.text || '').trim().slice(0, ANALYSIS_ASK_MAX_QUESTION);
-    if (!text) continue;
-    contents.push({ role, parts: [{ text }] });
+    return text ? `${speaker}: ${text}` : '';
+  }).filter(Boolean);
+  const promptParts = [
+    system,
+    '',
+    russian ? 'Контекст анализа (JSON):' : 'Analysis context (JSON):',
+    contextJson
+  ];
+  if (historyLines.length) {
+    promptParts.push('', russian ? 'Предыдущие сообщения:' : 'Previous messages:', historyLines.join('\n'));
   }
-  contents.push({ role: 'user', parts: [{ text: q }] });
-  const data = await callGemini({ contents }, 'quick', { isVideo: false, liteOnly: true });
+  promptParts.push(
+    '',
+    russian ? `Вопрос: ${q}` : `Question: ${q}`,
+    '',
+    russian
+      ? 'Ответь обычным текстом (plain text). Не возвращай JSON и не повторяй весь отчёт целиком.'
+      : 'Reply in plain text only. Do not return JSON and do not repeat the full report.'
+  );
+  const requestBody = {
+    contents: [{ parts: [{ text: promptParts.join('\n') }] }]
+  };
+  const data = await callGemini(requestBody, 'quick', { isVideo: false, plainText: true });
   const answer = extractModelText(data).trim();
   if (!answer) {
     const error = new Error(russian ? 'Пустой ответ модели.' : 'Empty model response.');
@@ -808,6 +818,7 @@ async function runTextFallbackGemini({ prompt, context, language, platform, url,
 async function callGemini(requestBody, mode = 'pro', options = {}) {
   const isVideo = options.isVideo === true;
   const liteOnly = options.liteOnly === true;
+  const plainText = options.plainText === true;
   const recoveryPass = options.recoveryPass === true;
   const quick = mode === 'quick' || isVideo;
   const ad = mode === 'ad';
@@ -844,7 +855,8 @@ async function callGemini(requestBody, mode = 'pro', options = {}) {
             temperature,
             topP: 0.92,
             maxOutputTokens: tokenCap,
-            usesTools
+            usesTools,
+            plainText
           });
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`, {
             method: 'POST',

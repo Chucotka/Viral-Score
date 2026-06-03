@@ -7522,7 +7522,9 @@
             analysisAskCard.classList.remove('hidden');
             resetAnalysisAskSession(meta.id);
             renderAnalysisAskChips();
-            renderAnalysisAskMessages();
+            if (!state.analysisAsk.pending) {
+                renderAnalysisAskMessages();
+            }
             updateAnalysisAskLimitLabel();
             setAnalysisAskBusy(state.analysisAsk.pending);
             if (analysisAskInput && !state.analysisAsk.pending) {
@@ -7540,10 +7542,12 @@
             }
             const askUrl = getBackendEndpointUrl('/api/ask-analysis');
             if (!askUrl) {
-                const errMsg = document.createElement('div');
-                errMsg.className = 'analysis-ask-msg assistant';
-                errMsg.textContent = t('analysisAskNoBackend');
-                analysisAskMessages?.appendChild(errMsg);
+                state.analysisAsk.messages.push({ role: 'user', text: question });
+                state.analysisAsk.messages.push({
+                    role: 'assistant',
+                    text: t('analysisAskNoBackend')
+                });
+                renderAnalysisAskMessages();
                 return;
             }
             state.analysisAsk.messages.push({ role: 'user', text: question });
@@ -7564,10 +7568,14 @@
                 text: m.text
             }));
 
+            let askTimeout = null;
             try {
+                const controller = new AbortController();
+                askTimeout = setTimeout(() => controller.abort(), 45000);
                 const response = await fetch(askUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    signal: controller.signal,
                     body: JSON.stringify({
                         question,
                         result: state.lastAnalysisResult,
@@ -7594,15 +7602,19 @@
             } catch (err) {
                 console.error(err);
                 state.analysisAsk.turnsUsed = Math.max(0, state.analysisAsk.turnsUsed - 1);
+                const errText = err?.name === 'AbortError'
+                    ? (state.lang === 'ru' ? 'Ответ занял слишком много времени. Попробуй ещё раз.' : 'Answer timed out. Please try again.')
+                    : String(err?.message || t('analysisAskFailed'));
                 state.analysisAsk.messages.push({
                     role: 'assistant',
-                    text: String(err?.message || t('analysisAskFailed'))
+                    text: errText
                 });
                 trackEvent(ANALYTICS_EVENTS.analysis_ask_failed, {
                     source: 'result_screen',
                     error_message: String(err?.message || err).slice(0, 200)
                 });
             } finally {
+                if (askTimeout) clearTimeout(askTimeout);
                 loadingEl.remove();
                 renderAnalysisAskMessages();
                 setAnalysisAskBusy(false);
