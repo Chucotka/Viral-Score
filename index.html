@@ -1408,49 +1408,6 @@
             margin-top: 16px;
         }
 
-        .launch-checklist {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            margin: 12px 0 20px;
-        }
-
-        .launch-item {
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-            background: rgba(255,255,255,0.035);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 12px;
-            padding: 12px;
-        }
-
-        .launch-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 999px;
-            background: var(--score-low);
-            margin-top: 5px;
-            flex-shrink: 0;
-        }
-
-        .launch-item.ready .launch-dot {
-            background: var(--score-high);
-        }
-
-        .launch-item-title {
-            font-size: 13px;
-            font-weight: 700;
-            color: var(--text-main);
-        }
-
-        .launch-item-note {
-            font-size: 12px;
-            color: var(--text-muted);
-            line-height: 1.4;
-            margin-top: 2px;
-        }
-
         /* Animations */
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
@@ -2401,10 +2358,6 @@
                     <button type="button" class="secondary-btn" id="bot-link-type-bot-btn" data-i18n="botLinkTypeBot">Bot start</button>
                 </div>
             </div>
-
-            <div class="section-title" style="margin-top: 20px;" data-i18n="launchTitle">Launch readiness</div>
-            <div class="modal-desc" data-i18n="launchDesc">Checklist for moving from local MVP to a Telegram Mini App.</div>
-            <div class="launch-checklist" id="launch-checklist"></div>
         </div>
     </div>
 
@@ -2464,7 +2417,6 @@
         const clearDraftBtn = document.getElementById('clear-draft-btn');
         const backendStatusPill = document.getElementById('backend-status-pill');
         const botUsernameInput = document.getElementById('bot-username-input');
-        const launchChecklist = document.getElementById('launch-checklist');
         const analyzeBtn = document.getElementById('analyze-btn');
         const analyzeBtnLabel = analyzeBtn?.querySelector('[data-i18n="primaryCta"]');
         const appHomeBtn = document.getElementById('app-home-btn');
@@ -4612,7 +4564,6 @@
             renderBackendStatusPill();
             syncPaymentButtons();
             updateQuotaLabel();
-            renderLaunchChecklist();
             syncPlgChrome();
             applyExperimentVariants();
         }
@@ -6355,7 +6306,6 @@
             setSettingsStatus('');
             refreshMonetizationHints();
             syncPaymentButtons();
-            renderLaunchChecklist();
             settingsModal.classList.add('active');
         }
 
@@ -6673,7 +6623,6 @@
             safeStorage.setItem(STORAGE_KEYS.freeLimit, String(state.freeLimit));
             syncPaymentButtons();
             updateQuotaLabel();
-            renderLaunchChecklist();
             refreshMonetizationHints();
         }
 
@@ -6748,32 +6697,8 @@
             saveMonetizationConfig();
         }
 
-        function isPaymentConfigured() {
-            if (state.billingMode === 'both') return Boolean(state.starsInvoiceUrl || state.cardCheckoutUrl || state.tributeUrl);
-            if (state.billingMode === 'tribute') return Boolean(state.tributeUrl);
-            return Boolean(state.starsInvoiceUrl);
-        }
-
         function needsStarsInvoiceUrl() {
             return state.billingMode === 'stars' || state.billingMode === 'both';
-        }
-
-        /** Launch checklist: free tier does not require payment URLs. */
-        function isLaunchMonetizationReady() {
-            if (isPaymentConfigured()) return true;
-            if (state.freeLimit > 0) return true;
-            return false;
-        }
-
-        function getLaunchMonetizationNote(ready) {
-            if (ready) return state.lang === 'ru' ? 'Готово.' : 'Ready.';
-            if (state.freeLimit > 0) return t('launchPaymentsOptional');
-            if (needsStarsInvoiceUrl() && state.backendHealth?.botConfigured) {
-                return state.lang === 'ru'
-                    ? 'Открой Настройки (⚙️) → «Сгенерировать ссылку Stars».'
-                    : 'Open Settings (⚙️) → “Generate Stars invoice link”.';
-            }
-            return state.lang === 'ru' ? 'Нужно перед запуском.' : 'Needed before launch.';
         }
 
         function canAnalyze() {
@@ -6801,59 +6726,6 @@
         function shouldUseDirectBackendUpload() {
             // Vercel has a ~4.5MB request body limit — never send raw video in /api/analyze on production.
             return isLocalBackendUrl();
-        }
-
-        function renderLaunchChecklist() {
-            if (!launchChecklist) return;
-            const safeProtocol = window.location.protocol === 'https:' || Boolean(tg);
-            const backendState = state.backendStatus;
-            const backendReady = backendState === 'ok';
-            const backendReadyText = backendState === 'checking'
-                ? t('launchBackendChecking')
-                : backendState === 'fail'
-                    ? t('launchBackendUnavailable')
-                    : t('launchApiReady');
-            const backendNote = backendState === 'checking'
-                ? (state.lang === 'ru' ? 'Подключаемся...' : 'Connecting...')
-                : backendState === 'fail'
-                    ? (state.lang === 'ru' ? 'Проверь URL и сервер.' : 'Check the URL and server.')
-                    : (state.lang === 'ru' ? 'Готово.' : 'Ready.');
-            const items = [
-                { ready: backendReady, readyText: backendReadyText, missingText: state.backendUrl ? backendNote : t('launchApiMissing') },
-                { ready: safeProtocol, readyText: t('launchHostingReady'), missingText: t('launchHostingMissing') },
-                { ready: Boolean(state.botUsername), readyText: t('launchBotReady'), missingText: t('launchBotMissing') },
-                {
-                    ready: isLaunchMonetizationReady(),
-                    readyText: isPaymentConfigured() ? t('launchPaymentsReady') : t('launchPaymentsOptional'),
-                    missingText: t('launchPaymentsMissing')
-                },
-                {
-                    ready: state.billingMode === 'tribute' || Boolean(state.backendHealth?.botConfigured),
-                    readyText: t('launchStarsReady'),
-                    missingText: t('launchStarsMissing')
-                }
-            ];
-            launchChecklist.innerHTML = '';
-            items.forEach(item => {
-                const row = document.createElement('div');
-                row.className = `launch-item ${item.ready ? 'ready' : ''}`;
-                const dot = document.createElement('div');
-                dot.className = 'launch-dot';
-                const body = document.createElement('div');
-                const title = document.createElement('div');
-                title.className = 'launch-item-title';
-                title.textContent = item.ready ? item.readyText : item.missingText;
-                const note = document.createElement('div');
-                note.className = 'launch-item-note';
-                note.textContent = item.ready
-                    ? (isPaymentConfigured()
-                        ? (state.lang === 'ru' ? 'Готово.' : 'Ready.')
-                        : t('launchPaymentsOptional'))
-                    : getLaunchMonetizationNote(false);
-                body.append(title, note);
-                row.append(dot, body);
-                launchChecklist.appendChild(row);
-            });
         }
 
         function syncPaymentButtons() {
@@ -6917,7 +6789,6 @@
                 document.getElementById('stars-price-input').value = String(price);
                 saveMonetizationConfig();
                 syncPaymentButtons();
-                renderLaunchChecklist();
                 if (!silent) setSettingsStatus(t('starsInvoiceGenerated'), 'ok');
                 return true;
             } catch (error) {
@@ -7023,7 +6894,6 @@
                 state.backendStatus = 'missing';
                 state.backendHealth = {};
                 renderBackendStatusPill();
-                renderLaunchChecklist();
                 return;
             }
             const healthUrl = getBackendHealthUrl();
@@ -7031,12 +6901,10 @@
                 state.backendStatus = 'fail';
                 state.backendHealth = {};
                 renderBackendStatusPill();
-                renderLaunchChecklist();
                 return;
             }
             state.backendStatus = 'checking';
             renderBackendStatusPill();
-            renderLaunchChecklist();
             let timeout = null;
             try {
                 const controller = new AbortController();
@@ -7062,7 +6930,6 @@
             }
             renderBackendStatusPill();
             await maybeAutoConfigureMonetization();
-            renderLaunchChecklist();
             syncPaymentButtons();
         }
 
@@ -7085,7 +6952,6 @@
                     safeStorage.setItem(STORAGE_KEYS.accessUnlocked, data.accessUnlocked ? '1' : '0');
                 }
                 updateQuotaLabel();
-                renderLaunchChecklist();
             } catch {
                 // Silent fallback for local/offline runs.
             }

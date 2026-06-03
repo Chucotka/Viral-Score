@@ -87,9 +87,10 @@ Developer allowlist (no UI, env on Vercel only):
 
 ```txt
 DEVELOPER_CLIENT_IDS=your_client_id_from_localStorage,another_id
+TELEGRAM_DEV_USER_IDS=123456789
 ```
 
-Those IDs get unlimited analyses and premium flags via `/api/status`, but the allowlist itself is never sent to browsers. Find your id in DevTools → Application → `viral_score_client_id_v1`, or `localStorage.getItem('viral_score_client_id_v1')`.
+Server-only allowlist: clients in `DEVELOPER_CLIENT_IDS` (e.g. `local:uuid` in browser or `tg:123456789` in Mini App) or Telegram numeric IDs in `TELEGRAM_DEV_USER_IDS` get unlimited analyses and premium flags via `/api/status`. The allowlist is never sent to browsers.
 
 Free quota billing: only non-degraded successful analyses increment `usageCount`. Degraded text fallbacks (overload / video failure) do not consume a free attempt.
 
