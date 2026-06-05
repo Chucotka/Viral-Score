@@ -1771,10 +1771,25 @@
             line-height: 1.5;
         }
 
+        .account-pay-label {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            text-align: center;
+            margin-bottom: 10px;
+        }
+
         .account-pay-actions {
             display: flex;
             flex-direction: column;
             gap: 10px;
+        }
+
+        .account-pay-actions .primary-btn,
+        .account-pay-actions .secondary-btn {
+            width: 100%;
         }
 
         .account-operator-link {
@@ -2347,12 +2362,13 @@
                 <li data-i18n="paywallFeature2">Copy hook, caption &amp; CTA</li>
                 <li data-i18n="paywallFeature3">Unlimited analyses</li>
             </ul>
+            <p class="account-pay-label hidden" id="account-pay-label" data-i18n="accountPayChoose">Choose payment method</p>
             <div class="account-pay-actions" id="account-pay-actions">
                 <button type="button" class="primary-btn primary-cta" id="account-stars-btn" data-i18n="accountSubscribeStars">Subscribe with Stars</button>
+                <button type="button" class="secondary-btn hidden" id="account-tribute-btn" data-i18n="accountPayTribute">Subscribe via Tribute</button>
                 <button type="button" class="secondary-btn hidden" id="account-card-btn" data-i18n="accountPayCard">Pay by card</button>
-                <button type="button" class="secondary-btn hidden" id="account-tribute-btn" data-i18n="accountPayTribute">Support via Tribute</button>
             </div>
-            <p class="plg-trust" id="account-trust" data-i18n="paywallTrust">Pay inside Telegram · no card required</p>
+            <p class="plg-trust" id="account-trust" data-i18n="accountPayTrust">Stars or Tribute · pay inside Telegram</p>
             <button type="button" class="account-operator-link hidden" id="account-operator-link" data-i18n="accountOperatorLink">Launch setup →</button>
         </div>
     </div>
@@ -2454,8 +2470,12 @@
                 <li data-i18n="paywallFeature2">Copy hook, caption &amp; CTA</li>
                 <li data-i18n="paywallFeature3">Unlimited analyses</li>
             </ul>
-            <button type="button" class="primary-btn primary-cta" id="paywall-stars-btn" data-i18n="paywallCta">Unlock with Telegram Stars</button>
-            <p class="plg-trust" data-i18n="paywallTrust">Pay inside Telegram · no card required</p>
+            <p class="account-pay-label hidden" id="paywall-pay-label" data-i18n="accountPayChoose">Choose payment method</p>
+            <div class="account-pay-actions" id="paywall-pay-actions">
+                <button type="button" class="primary-btn primary-cta" id="paywall-stars-btn" data-i18n="paywallCta">Unlock with Telegram Stars</button>
+                <button type="button" class="secondary-btn hidden" id="paywall-tribute-btn" data-i18n="accountPayTribute">Subscribe via Tribute</button>
+            </div>
+            <p class="plg-trust" id="paywall-trust" data-i18n="accountPayTrust">Stars or Tribute · pay inside Telegram</p>
         </div>
     </div>
 
@@ -2480,8 +2500,12 @@
         const accountPricingEl = document.getElementById('account-pricing');
         const accountStarsBtn = document.getElementById('account-stars-btn');
         const accountCardBtn = document.getElementById('account-card-btn');
+        const accountPayLabel = document.getElementById('account-pay-label');
         const accountTributeBtn = document.getElementById('account-tribute-btn');
         const accountTrustEl = document.getElementById('account-trust');
+        const paywallPayLabel = document.getElementById('paywall-pay-label');
+        const paywallTributeBtn = document.getElementById('paywall-tribute-btn');
+        const paywallTrustEl = document.getElementById('paywall-trust');
         const accountOperatorLink = document.getElementById('account-operator-link');
         const settingsModal = document.getElementById('settings-modal');
         const settingsBtn = document.getElementById('settings-btn');
@@ -2764,9 +2788,11 @@
                 accountStatusFree: (left, total) => `Free plan · ${left} of ${total} analyses left`,
                 accountStatusNoFree: 'Free plan · quota used',
                 accountPricingLine: (stars, rub) => `Premium: ${rub} ₽/month or ${stars} Stars/month`,
+                accountPayChoose: 'Choose payment method',
+                accountPayTrust: 'Stars or Tribute · pay inside Telegram',
                 accountSubscribeStars: (stars) => `Subscribe · ${stars} Stars/month`,
                 accountPayCard: (rub) => `Pay by card · ${rub} ₽/month`,
-                accountPayTribute: 'Support via Tribute',
+                accountPayTribute: (rub) => `Subscribe · ${rub} ₽/month via Tribute`,
                 accountOperatorLink: 'Launch setup →',
                 settingsTitle: '⚙️ Launch setup',
                 settingsDesc: 'Operator panel: backend URL, monetization, and bot wiring. End users never see this screen in production.',
@@ -3038,9 +3064,11 @@
                 accountStatusFree: (left, total) => `Бесплатный план · осталось ${left} из ${total} анализов`,
                 accountStatusNoFree: 'Бесплатный план · лимит исчерпан',
                 accountPricingLine: (stars, rub) => `Premium: ${rub} ₽/мес или ${stars} Stars/мес`,
+                accountPayChoose: 'Выбери способ оплаты',
+                accountPayTrust: 'Stars или Tribute · оплата в Telegram',
                 accountSubscribeStars: (stars) => `Подписка · ${stars} Stars/мес`,
                 accountPayCard: (rub) => `Оплата картой · ${rub} ₽/мес`,
-                accountPayTribute: 'Поддержка через Tribute',
+                accountPayTribute: (rub) => `Подписка · ${rub} ₽/мес через Tribute`,
                 accountOperatorLink: 'Настройка запуска →',
                 settingsTitle: '⚙️ Настройка запуска',
                 settingsDesc: 'Панель оператора: backend, монетизация и бот. Обычные пользователи в продакшене этого экрана не видят.',
@@ -6435,6 +6463,56 @@
             syncAccountModal();
         }
 
+        function isTributeCheckoutReady() {
+            return Boolean(state.tributeUrl);
+        }
+
+        function syncPaymentChoiceUi(options = {}) {
+            const {
+                starsBtn,
+                tributeBtn,
+                cardBtn,
+                payLabel,
+                trustEl,
+                starsText,
+                tributeText,
+                cardText
+            } = options;
+            const rub = state.premiumRubMonthly || PREMIUM_RUB_MONTHLY;
+            const stars = state.starsPrice || PREMIUM_STARS_MONTHLY;
+            const unlocked = Boolean(state.accessUnlocked);
+            const showStars = !unlocked && isStarsCheckoutReady();
+            const showTribute = !unlocked && isTributeCheckoutReady();
+            const showCard = !unlocked && Boolean(state.cardCheckoutUrl);
+            if (starsBtn) {
+                starsBtn.classList.toggle('hidden', !showStars);
+                starsBtn.disabled = !isStarsCheckoutReady();
+                if (starsText) starsBtn.textContent = starsText;
+            }
+            if (tributeBtn) {
+                tributeBtn.classList.toggle('hidden', !showTribute);
+                tributeBtn.disabled = !isTributeCheckoutReady();
+                if (tributeText) tributeBtn.textContent = tributeText;
+            }
+            if (cardBtn) {
+                cardBtn.classList.toggle('hidden', !showCard);
+                if (cardText) cardBtn.textContent = cardText;
+            }
+            if (payLabel) {
+                payLabel.classList.toggle('hidden', unlocked || !(showStars && showTribute));
+            }
+            if (trustEl) {
+                const hideTrust = unlocked || (!showStars && !showTribute && !showCard);
+                trustEl.classList.toggle('hidden', hideTrust);
+                if (!hideTrust) {
+                    trustEl.textContent = showStars && showTribute
+                        ? t('accountPayTrust')
+                        : (showStars ? t('paywallTrust') : t('accountPayTrust'));
+                }
+            }
+            return { showStars, showTribute, showCard, rub, stars };
+        }
+
         function syncAccountModal() {
             const rub = state.premiumRubMonthly || PREMIUM_RUB_MONTHLY;
             const stars = state.starsPrice || PREMIUM_STARS_MONTHLY;
@@ -6455,26 +6533,16 @@
             if (accountPricingEl) {
                 accountPricingEl.textContent = t('accountPricingLine', stars, rub);
             }
-            const showStars = (state.billingMode === 'stars' || state.billingMode === 'both') && !state.accessUnlocked;
-            const showTribute = (state.billingMode === 'tribute' || state.billingMode === 'both')
-                && Boolean(state.tributeUrl) && !state.accessUnlocked;
-            const showCard = state.billingMode === 'both' && Boolean(state.cardCheckoutUrl) && !state.accessUnlocked;
-            if (accountStarsBtn) {
-                accountStarsBtn.classList.toggle('hidden', !showStars);
-                accountStarsBtn.disabled = !isStarsCheckoutReady();
-                accountStarsBtn.textContent = t('accountSubscribeStars', stars);
-            }
-            if (accountCardBtn) {
-                accountCardBtn.classList.toggle('hidden', !showCard);
-                accountCardBtn.textContent = t('accountPayCard', rub);
-            }
-            if (accountTributeBtn) {
-                accountTributeBtn.classList.toggle('hidden', !showTribute);
-            }
-            if (accountTrustEl) {
-                const hideTrust = state.accessUnlocked || (!showStars && !showCard && !showTribute);
-                accountTrustEl.classList.toggle('hidden', hideTrust);
-            }
+            syncPaymentChoiceUi({
+                starsBtn: accountStarsBtn,
+                tributeBtn: accountTributeBtn,
+                cardBtn: accountCardBtn,
+                payLabel: accountPayLabel,
+                trustEl: accountTrustEl,
+                starsText: t('accountSubscribeStars', stars),
+                tributeText: t('accountPayTribute', rub),
+                cardText: t('accountPayCard', rub)
+            });
             const payActions = document.getElementById('account-pay-actions');
             if (payActions) {
                 payActions.classList.toggle('hidden', Boolean(state.accessUnlocked));
@@ -6717,6 +6785,23 @@
             saveDraft();
         }
 
+        function syncPaywallModal() {
+            const stars = state.starsPrice || PREMIUM_STARS_MONTHLY;
+            const rub = state.premiumRubMonthly || PREMIUM_RUB_MONTHLY;
+            syncPaymentChoiceUi({
+                starsBtn: paywallStarsBtn,
+                tributeBtn: paywallTributeBtn,
+                payLabel: paywallPayLabel,
+                trustEl: paywallTrustEl,
+                starsText: t('accountSubscribeStars', stars),
+                tributeText: t('accountPayTribute', rub)
+            });
+            const payActions = document.getElementById('paywall-pay-actions');
+            if (payActions) {
+                payActions.classList.toggle('hidden', Boolean(state.accessUnlocked));
+            }
+        }
+
         function openStarsPaywallModal(reason = 'export', sourceScreen = lastPaywallSourceScreen) {
             if (reason === 'analyze_limit') {
                 trackEvent(ANALYTICS_EVENTS.quota_limit_hit, {
@@ -6737,6 +6822,7 @@
             } else if (desc) {
                 desc.textContent = t('paywallDesc');
             }
+            syncPaywallModal();
             if (starsPaywallModal) starsPaywallModal.classList.add('active');
         }
 
@@ -7017,6 +7103,7 @@
                 resultsUnlockCta.disabled = !starsReady;
             }
             syncAccountModal();
+            syncPaywallModal();
             if (copyBotLinkBtn) {
                 copyBotLinkBtn.disabled = !getBotShareLink();
                 copyBotLinkBtn.title = getBotShareLink() ? '' : t('launchBotMissing');
@@ -8647,6 +8734,14 @@
                     }, { location: 'paywall-stars-btn' });
                     closeStarsPaywallModal();
                     openStarsCheckout().catch(err => console.error(err));
+                });
+            }
+            if (paywallTributeBtn) {
+                paywallTributeBtn.addEventListener('click', () => {
+                    lastPaywallReason = lastPaywallReason || 'paywall';
+                    lastPaywallSourceScreen = lastPaywallSourceScreen || 'paywall';
+                    closeStarsPaywallModal();
+                    openTributeCheckout();
                 });
             }
             if (resultsUnlockCta) {
