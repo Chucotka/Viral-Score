@@ -1961,7 +1961,7 @@
                     <button type="button" data-lang="en">EN</button>
                     <button type="button" data-lang="ru">RU</button>
                 </div>
-                <button class="icon-btn" id="settings-btn" aria-label="Settings">
+                <button class="icon-btn hidden" id="settings-btn" aria-label="Settings" hidden>
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -2285,8 +2285,8 @@
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                 </svg>
             </button>
-            <div class="modal-title" data-i18n="settingsTitle">⚙️ Settings</div>
-            <div class="modal-desc" data-i18n="settingsDesc">The app uses your private backend for Gemini analysis, so users never enter or see an API key.</div>
+            <div class="modal-title" data-i18n="settingsTitle">⚙️ Launch setup</div>
+            <div class="modal-desc" data-i18n="settingsDesc">Operator panel: backend URL, monetization, and bot wiring. End users never see this screen in production.</div>
 
             <div class="input-group">
                 <label for="backend-url-input" data-i18n="backendUrlLabel">Analysis backend URL</label>
@@ -2668,8 +2668,8 @@
                 downloadReport: 'Download Report',
                 analyzeAgain: 'Analyze Again',
                 shareResult: 'Share Result',
-                settingsTitle: '⚙️ Settings',
-                settingsDesc: 'The app uses your private backend for Gemini analysis, so users never enter or see an API key.',
+                settingsTitle: '⚙️ Launch setup',
+                settingsDesc: 'Operator panel: backend URL, monetization, and bot wiring. End users never see this screen in production.',
                 backendUrlLabel: 'Analysis backend URL',
                 saveBackend: 'Save backend',
                 monetizationTitle: 'Monetization',
@@ -2729,7 +2729,7 @@
                 contextPlaceholder: 'Target audience, goal, offer, CTA, or anything the model should know...',
                 linkTextPlaceholder: 'Add caption, transcript or notes for the link...',
                 videoTextPlaceholder: 'Add caption, transcript or notes for the video...',
-                backendRequired: 'Analysis backend is not configured. Add a backend URL in Settings.',
+                backendRequired: 'Analysis backend is not configured. Try again later or contact support.',
                 apiRequired: 'Analysis backend is required to use the app.',
                 noPriorComparison: 'No prior comparison',
                 firstSaved: 'First saved result',
@@ -2932,8 +2932,8 @@
                 downloadReport: 'Скачать отчёт',
                 analyzeAgain: 'Новый анализ',
                 shareResult: 'Поделиться',
-                settingsTitle: '⚙️ Настройки',
-                settingsDesc: 'Приложение использует твой приватный backend для Gemini-анализа, поэтому пользователи не вводят и не видят API key.',
+                settingsTitle: '⚙️ Настройка запуска',
+                settingsDesc: 'Панель оператора: backend, монетизация и бот. Обычные пользователи в продакшене этого экрана не видят.',
                 backendUrlLabel: 'URL backend для анализа',
                 saveBackend: 'Сохранить backend',
                 monetizationTitle: 'Монетизация',
@@ -2993,7 +2993,7 @@
                 contextPlaceholder: 'ЦА, цель, оффер, CTA или любой важный контекст...',
                 linkTextPlaceholder: 'Добавь caption, транскрипт или заметки к ссылке...',
                 videoTextPlaceholder: 'Добавь caption, транскрипт или заметки к видео...',
-                backendRequired: 'Backend анализа не настроен. Добавь backend URL в настройках.',
+                backendRequired: 'Backend анализа недоступен. Попробуй позже или напиши в поддержку.',
                 apiRequired: 'Для работы приложения нужен backend анализа.',
                 noPriorComparison: 'Нет предыдущего сравнения',
                 firstSaved: 'Первый сохранённый результат',
@@ -4425,6 +4425,24 @@
             });
         }
 
+        function isLocalDevHost() {
+            const host = String(window.location.hostname || '').toLowerCase();
+            return window.location.protocol === 'file:'
+                || host === 'localhost'
+                || host === '127.0.0.1'
+                || host === '0.0.0.0'
+                || host.endsWith('.local');
+        }
+
+        const urlSetupToken = new URLSearchParams(window.location.search).get('setup') || '';
+        if (urlSetupToken) {
+            try { sessionStorage.setItem('vs_setup_token', urlSetupToken); } catch { /* ignore */ }
+        }
+
+        const persistedSetupToken = (() => {
+            try { return sessionStorage.getItem('vs_setup_token') || ''; } catch { return ''; }
+        })();
+
         const state = {
             apiKey: safeStorage.getItem(STORAGE_KEYS.apiKey) || '',
             backendUrl: (() => {
@@ -4436,16 +4454,18 @@
                 return storedBackendUrl && !storedIsLocal ? storedBackendUrl : DEFAULT_BACKEND_URL;
             })(),
             lang: safeStorage.getItem(STORAGE_KEYS.lang) || (navigator.language && navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'),
-            billingMode: safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both',
-            starsInvoiceUrl: safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '',
+            setupToken: urlSetupToken || persistedSetupToken,
+            isOperator: isLocalDevHost(),
+            billingMode: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both') : 'stars',
+            starsInvoiceUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '') : '',
             starsPrice: Number(safeStorage.getItem(STORAGE_KEYS.starsPrice) || String(PREMIUM_STARS_MONTHLY)),
-            tributeUrl: safeStorage.getItem(STORAGE_KEYS.tributeUrl) || '',
-            cardCheckoutUrl: safeStorage.getItem(STORAGE_KEYS.cardCheckoutUrl) || '',
-            botUsername: safeStorage.getItem(STORAGE_KEYS.botUsername) || '',
+            tributeUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.tributeUrl) || '') : '',
+            cardCheckoutUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.cardCheckoutUrl) || '') : '',
+            botUsername: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.botUsername) || '') : '',
             clientId: safeStorage.getItem(STORAGE_KEYS.clientId) || makeClientId(),
             backendStatus: 'unknown',
             backendHealth: {},
-            freeLimit: Number(safeStorage.getItem(STORAGE_KEYS.freeLimit) || '3'),
+            freeLimit: isLocalDevHost() ? Number(safeStorage.getItem(STORAGE_KEYS.freeLimit) || '3') : 3,
             usageCount: Number(safeStorage.getItem(STORAGE_KEYS.usageCount) || '0'),
             accessUnlocked: safeStorage.getItem(STORAGE_KEYS.accessUnlocked) === '1',
             accessExpiresAt: safeStorage.getItem(STORAGE_KEYS.accessExpiresAt) || null,
@@ -6295,7 +6315,71 @@
             if (analyzeBtnLabel) analyzeBtnLabel.textContent = t('primaryCta');
         }
 
+        function canUseLocalConfigOverrides() {
+            return isLocalDevHost() || Boolean(state.isOperator);
+        }
+
+        function syncOperatorChrome() {
+            const show = Boolean(state.isOperator);
+            document.body.classList.toggle('operator-mode', show);
+            if (settingsBtn) {
+                settingsBtn.classList.toggle('hidden', !show);
+                settingsBtn.hidden = !show;
+            }
+        }
+
+        function applyServerAppConfig(app) {
+            if (!app || typeof app !== 'object') return;
+            if (app.botUsername) state.botUsername = normalizeBotUsername(app.botUsername);
+            if (typeof app.freeLimit === 'number') state.freeLimit = app.freeLimit;
+            if (app.billingMode) state.billingMode = app.billingMode;
+            if (typeof app.starsPrice === 'number') state.starsPrice = app.starsPrice;
+            if (typeof app.tributeUrl === 'string') state.tributeUrl = app.tributeUrl;
+            if (typeof app.cardCheckoutUrl === 'string') state.cardCheckoutUrl = app.cardCheckoutUrl;
+            if (!canUseLocalConfigOverrides()) {
+                safeStorage.removeItem(STORAGE_KEYS.freeLimit);
+                safeStorage.removeItem(STORAGE_KEYS.billingMode);
+                safeStorage.removeItem(STORAGE_KEYS.botUsername);
+                safeStorage.removeItem(STORAGE_KEYS.tributeUrl);
+                safeStorage.removeItem(STORAGE_KEYS.cardCheckoutUrl);
+                safeStorage.removeItem(STORAGE_KEYS.starsPrice);
+                safeStorage.removeItem(STORAGE_KEYS.starsInvoiceUrl);
+            }
+            if (botUsernameInput) botUsernameInput.value = state.botUsername;
+            const freeLimitInput = document.getElementById('free-limit-input');
+            if (freeLimitInput) freeLimitInput.value = String(state.freeLimit);
+            const starsPriceInput = document.getElementById('stars-price-input');
+            if (starsPriceInput) starsPriceInput.value = String(state.starsPrice);
+            const tributeInput = document.getElementById('tribute-url-input');
+            if (tributeInput) tributeInput.value = state.tributeUrl;
+            const cardInput = document.getElementById('card-checkout-url-input');
+            if (cardInput) cardInput.value = state.cardCheckoutUrl;
+            setBillingMode(state.billingMode);
+            syncPaymentButtons();
+            updateQuotaLabel();
+            refreshMonetizationHints();
+        }
+
+        async function fetchPublicAppConfig() {
+            const endpoints = [];
+            try {
+                const ep = getBackendEndpointUrl('/api/public-config');
+                if (ep) endpoints.push(ep);
+            } catch { /* ignore */ }
+            endpoints.push('/api/public-config');
+            for (const ep of endpoints) {
+                try {
+                    const res = await fetch(ep, { method: 'GET' });
+                    if (!res.ok) continue;
+                    const cfg = await res.json();
+                    if (cfg?.app) return cfg.app;
+                } catch { /* try next */ }
+            }
+            return null;
+        }
+
         function openSettings() {
+            if (!state.isOperator) return;
             backendUrlInput.value = state.backendUrl;
             document.getElementById('stars-invoice-input').value = state.starsInvoiceUrl;
             document.getElementById('stars-price-input').value = String(state.starsPrice);
@@ -6311,7 +6395,7 @@
 
         function closeSettings() {
             settingsModal.classList.remove('active');
-            if (!canAnalyze()) {
+            if (state.isOperator && !canAnalyze()) {
                 mainError.textContent = t('backendRequired');
                 mainError.style.display = 'block';
             }
@@ -6746,13 +6830,18 @@
             return isLocalBackendUrl();
         }
 
+        function isStarsCheckoutReady() {
+            return Boolean(state.starsInvoiceUrl || state.backendHealth?.botConfigured);
+        }
+
         function syncPaymentButtons() {
+            const starsReady = isStarsCheckoutReady();
             if (paywallStarsBtn) {
-                paywallStarsBtn.disabled = !state.starsInvoiceUrl;
-                paywallStarsBtn.title = state.starsInvoiceUrl ? '' : t('starsMissing');
+                paywallStarsBtn.disabled = !starsReady;
+                paywallStarsBtn.title = starsReady ? '' : t('starsMissing');
             }
             if (resultsUnlockCta) {
-                resultsUnlockCta.disabled = !state.starsInvoiceUrl;
+                resultsUnlockCta.disabled = !starsReady;
             }
             if (copyBotLinkBtn) {
                 copyBotLinkBtn.disabled = !getBotShareLink();
@@ -6957,6 +7046,7 @@
             if (!_statusEndpoint) return;
             const statusUrl = new URL(_statusEndpoint);
             statusUrl.searchParams.set('clientId', state.clientId);
+            if (state.setupToken) statusUrl.searchParams.set('setup', state.setupToken);
             try {
                 const response = await fetch(statusUrl.toString());
                 if (!response.ok) return;
@@ -6964,6 +7054,16 @@
                 if (typeof data.usageCount === 'number') {
                     state.usageCount = data.usageCount;
                     safeStorage.setItem(STORAGE_KEYS.usageCount, String(state.usageCount));
+                }
+                if (typeof data.freeLimit === 'number') {
+                    state.freeLimit = data.freeLimit;
+                    if (!canUseLocalConfigOverrides()) {
+                        safeStorage.removeItem(STORAGE_KEYS.freeLimit);
+                    }
+                }
+                if (typeof data.isOperator === 'boolean') {
+                    state.isOperator = data.isOperator || isLocalDevHost();
+                    syncOperatorChrome();
                 }
                 applyPremiumSyncFromServer(data);
                 updateQuotaLabel();
@@ -7053,8 +7153,16 @@
             if (errorActions) errorActions.classList.remove('hidden');
         }
 
-        function openStarsCheckout() {
-            if (!state.starsInvoiceUrl) {
+        async function ensureStarsInvoiceUrl() {
+            if (state.starsInvoiceUrl) return state.starsInvoiceUrl;
+            if (!state.backendHealth?.botConfigured) return '';
+            const ok = await generateStarsInvoiceLink({ silent: true });
+            return ok ? state.starsInvoiceUrl : '';
+        }
+
+        async function openStarsCheckout() {
+            const invoiceUrl = await ensureStarsInvoiceUrl();
+            if (!invoiceUrl) {
                 mainError.textContent = t('starsMissing');
                 mainError.style.display = 'block';
                 return;
@@ -7091,10 +7199,10 @@
                 }
             };
             const openStarsInvoiceFallback = () => {
-                if (tg?.openTelegramLink && /t\.me/i.test(state.starsInvoiceUrl)) {
-                    tg.openTelegramLink(state.starsInvoiceUrl);
+                if (tg?.openTelegramLink && /t\.me/i.test(invoiceUrl)) {
+                    tg.openTelegramLink(invoiceUrl);
                 } else {
-                    window.open(state.starsInvoiceUrl, '_blank');
+                    window.open(invoiceUrl, '_blank');
                 }
             };
             if (!tg || !tg.openInvoice) {
@@ -7103,7 +7211,7 @@
                 return;
             }
             try {
-                tg.openInvoice(state.starsInvoiceUrl, onStarsInvoiceStatus);
+                tg.openInvoice(invoiceUrl, onStarsInvoiceStatus);
             } catch (err) {
                 console.error('openInvoice failed:', err);
                 openStarsInvoiceFallback();
@@ -7890,7 +7998,6 @@
             formData.append('language', state.lang);
             formData.append('context', contextInput.value.trim());
             formData.append('prompt', buildAnalysisPayload('', effectiveMode));
-            formData.append('freeLimit', String(state.freeLimit));
             if (state.currentSourceType === 'video-file' && state.selectedVideoFile) {
                 if (state.uploadedVideoBlobUrl) {
                     formData.append('videoBlobUrl', state.uploadedVideoBlobUrl);
@@ -8046,7 +8153,7 @@
             if (!analyzeBtn) return;
 
             if (!canAnalyze()) {
-                openSettings();
+                if (state.isOperator) openSettings();
                 mainError.textContent = t('backendRequired');
                 mainError.style.display = 'block';
                 return;
@@ -8327,7 +8434,7 @@
                         interaction_id: currentPaywallInteractionId
                     }, { location: 'paywall-stars-btn' });
                     closeStarsPaywallModal();
-                    openStarsCheckout();
+                    openStarsCheckout().catch(err => console.error(err));
                 });
             }
             if (resultsUnlockCta) {
@@ -8507,11 +8614,14 @@
         ensureTelegramClientId();
 
         applyDemoPrefillIfNeeded();
+        syncOperatorChrome();
         syncPlgChrome();
         if (!canAnalyze()) {
-            openSettings();
+            if (state.isOperator) openSettings();
+            fetchPublicAppConfig().then(applyServerAppConfig).catch(() => {});
         } else {
             refreshBackendHealth().then(async () => {
+                applyServerAppConfig(await fetchPublicAppConfig());
                 await maybeAutoConfigureMonetization();
                 await Promise.all([syncServerStatus(), syncServerHistory()]);
                 syncPlgChrome();

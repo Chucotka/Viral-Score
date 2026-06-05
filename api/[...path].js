@@ -11,8 +11,14 @@ import {
 import { assertRateLimit } from '../lib/rate-limit.js';
 import {
   hasPremiumAccess,
+  isDeveloperClient,
   shouldBillFreeAnalysis
 } from '../lib/developer-access.js';
+import {
+  FREE_TIER_LIMIT,
+  getPublicAppConfig,
+  isValidAdminSetupToken
+} from '../lib/app-config.js';
 import { handleTributeWebhookRequest } from '../lib/tribute-webhook.js';
 
 export const maxDuration = 300;
@@ -1139,7 +1145,7 @@ async function analyzeMultipart(formData) {
   const sourceType = String(formData.get('sourceType') || 'text');
   const language = String(formData.get('language') || 'en');
   const context = String(formData.get('context') || '').trim();
-  const freeLimit = Math.max(0, Number(formData.get('freeLimit') || '3'));
+  const freeLimit = FREE_TIER_LIMIT;
   const prompt = String(formData.get('prompt') || getPromptBase({ platform, mode, sourceType, language, context }));
   const video = formData.get('video');
   const url = String(formData.get('url') || '');
@@ -1347,13 +1353,18 @@ async function analyzeMultipart(formData) {
   };
 }
 
-async function getClientStatus(clientId) {
+async function getClientStatus(clientId, options = {}) {
+  const normalizedClientId = normalizeClientId(clientId);
   const client = await ensureClientRecord(clientId);
+  const isOperator = isDeveloperClient(normalizedClientId)
+    || isValidAdminSetupToken(options.setupToken);
   return {
-    clientId: normalizeClientId(clientId),
+    clientId: normalizedClientId,
     usageCount: client?.usageCount || 0,
     accessUnlocked: hasPremiumAccess(client, clientId),
     accessExpiresAt: client?.accessExpiresAt || null,
+    freeLimit: FREE_TIER_LIMIT,
+    isOperator,
     lastSeenAt: client?.lastSeenAt || null,
     lastAnalysis: client?.lastAnalysis || null
   };
@@ -1419,6 +1430,7 @@ async function createStarsInvoiceLink({ clientId, title, description, stars }) {
     error.statusCode = 400;
     throw error;
   }
+  await assertRateLimit(normalizedClientId, 'stars_invoice');
   const amount = Math.max(1, Math.min(25000, Math.round(Number(stars) || DEFAULT_STARS_MONTHLY_PRICE)));
   const invoiceTitle = String(title || 'Viral Score Premium').trim().slice(0, 32) || 'Viral Score Premium';
   const invoiceDescription = String(description || 'All features · billed monthly via Telegram Stars.').trim().slice(0, 255)
@@ -1652,7 +1664,8 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && path === '/api/public-config') {
       return sendJson(res, 200, {
         posthogKey: process.env.NEXT_PUBLIC_POSTHOG_KEY || process.env.POSTHOG_KEY || '',
-        posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com'
+        posthogHost: process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com',
+        app: getPublicAppConfig()
       });
     }
 
@@ -2017,7 +2030,9 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'GET' && path === '/api/status') {
-      return sendJson(res, 200, await getClientStatus(url.searchParams.get('clientId')));
+      return sendJson(res, 200, await getClientStatus(url.searchParams.get('clientId'), {
+        setupToken: url.searchParams.get('setup')
+      }));
     }
 
     if (req.method === 'GET' && path === '/api/history') {
