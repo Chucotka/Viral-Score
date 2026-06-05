@@ -1738,8 +1738,61 @@
             margin-bottom: 10px;
         }
 
-        .paywall-modal .modal-content {
+        .paywall-modal .modal-content,
+        .account-modal .modal-content {
             max-width: 400px;
+        }
+
+        .account-status {
+            padding: 12px 14px;
+            border-radius: 12px;
+            margin-bottom: 14px;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            line-height: 1.45;
+        }
+
+        .account-status--premium {
+            background: rgba(46, 204, 113, 0.12);
+            color: #6ee7a0;
+        }
+
+        .account-status--free {
+            background: rgba(123, 47, 255, 0.1);
+            color: var(--text-main);
+        }
+
+        .account-pricing {
+            font-size: 13px;
+            color: var(--text-muted);
+            text-align: center;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+
+        .account-pay-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .account-operator-link {
+            display: block;
+            width: 100%;
+            margin-top: 16px;
+            padding: 8px 0 0;
+            font-size: 12px;
+            text-align: center;
+            color: var(--text-muted);
+            background: none;
+            border: none;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
+        body:not(.operator-mode) .account-operator-link {
+            display: none !important;
         }
 
         .paywall-modal-score {
@@ -1961,7 +2014,7 @@
                     <button type="button" data-lang="en">EN</button>
                     <button type="button" data-lang="ru">RU</button>
                 </div>
-                <button class="icon-btn hidden" id="settings-btn" aria-label="Settings" hidden>
+                <button class="icon-btn" id="settings-btn" aria-label="Account" data-i18n-aria="accountBtnAria">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
@@ -2276,7 +2329,35 @@
         </div>
     </div>
 
-    <!-- Settings Modal -->
+    <!-- User account / subscription -->
+    <div class="modal-overlay account-modal" id="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
+        <div class="modal-content">
+            <button type="button" class="modal-close" id="close-account-btn" aria-label="Close">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+            <div class="modal-title" id="account-modal-title" data-i18n="accountTitle">Account</div>
+            <div class="modal-desc" data-i18n="accountDesc">Subscription status and payment options.</div>
+            <div class="account-status account-status--free" id="account-status"></div>
+            <p class="account-pricing" id="account-pricing"></p>
+            <ul class="paywall-modal-list">
+                <li data-i18n="paywallFeature1">Full report download</li>
+                <li data-i18n="paywallFeature2">Copy hook, caption &amp; CTA</li>
+                <li data-i18n="paywallFeature3">Unlimited analyses</li>
+            </ul>
+            <div class="account-pay-actions" id="account-pay-actions">
+                <button type="button" class="primary-btn primary-cta" id="account-stars-btn" data-i18n="accountSubscribeStars">Subscribe with Stars</button>
+                <button type="button" class="secondary-btn hidden" id="account-card-btn" data-i18n="accountPayCard">Pay by card</button>
+                <button type="button" class="secondary-btn hidden" id="account-tribute-btn" data-i18n="accountPayTribute">Support via Tribute</button>
+            </div>
+            <p class="plg-trust" id="account-trust" data-i18n="paywallTrust">Pay inside Telegram · no card required</p>
+            <button type="button" class="account-operator-link hidden" id="account-operator-link" data-i18n="accountOperatorLink">Launch setup →</button>
+        </div>
+    </div>
+
+    <!-- Operator launch setup (hidden from regular users) -->
     <div class="modal-overlay" id="settings-modal">
         <div class="modal-content">
             <button class="modal-close" id="close-settings-btn">
@@ -2393,6 +2474,15 @@
             results: document.getElementById('results-screen')
         };
 
+        const accountModal = document.getElementById('account-modal');
+        const closeAccountBtn = document.getElementById('close-account-btn');
+        const accountStatusEl = document.getElementById('account-status');
+        const accountPricingEl = document.getElementById('account-pricing');
+        const accountStarsBtn = document.getElementById('account-stars-btn');
+        const accountCardBtn = document.getElementById('account-card-btn');
+        const accountTributeBtn = document.getElementById('account-tribute-btn');
+        const accountTrustEl = document.getElementById('account-trust');
+        const accountOperatorLink = document.getElementById('account-operator-link');
         const settingsModal = document.getElementById('settings-modal');
         const settingsBtn = document.getElementById('settings-btn');
         const closeSettingsBtn = document.getElementById('close-settings-btn');
@@ -2668,6 +2758,16 @@
                 downloadReport: 'Download Report',
                 analyzeAgain: 'Analyze Again',
                 shareResult: 'Share Result',
+                accountBtnAria: 'Account and subscription',
+                accountTitle: 'Account',
+                accountDesc: 'Check your plan and subscribe to unlock unlimited analyses.',
+                accountStatusFree: (left, total) => `Free plan · ${left} of ${total} analyses left`,
+                accountStatusNoFree: 'Free plan · quota used',
+                accountPricingLine: (stars, rub) => `Premium: ${rub} ₽/month or ${stars} Stars/month`,
+                accountSubscribeStars: (stars) => `Subscribe · ${stars} Stars/month`,
+                accountPayCard: (rub) => `Pay by card · ${rub} ₽/month`,
+                accountPayTribute: 'Support via Tribute',
+                accountOperatorLink: 'Launch setup →',
                 settingsTitle: '⚙️ Launch setup',
                 settingsDesc: 'Operator panel: backend URL, monetization, and bot wiring. End users never see this screen in production.',
                 backendUrlLabel: 'Analysis backend URL',
@@ -2932,6 +3032,16 @@
                 downloadReport: 'Скачать отчёт',
                 analyzeAgain: 'Новый анализ',
                 shareResult: 'Поделиться',
+                accountBtnAria: 'Аккаунт и подписка',
+                accountTitle: 'Аккаунт',
+                accountDesc: 'Статус подписки и способы оплаты Premium.',
+                accountStatusFree: (left, total) => `Бесплатный план · осталось ${left} из ${total} анализов`,
+                accountStatusNoFree: 'Бесплатный план · лимит исчерпан',
+                accountPricingLine: (stars, rub) => `Premium: ${rub} ₽/мес или ${stars} Stars/мес`,
+                accountSubscribeStars: (stars) => `Подписка · ${stars} Stars/мес`,
+                accountPayCard: (rub) => `Оплата картой · ${rub} ₽/мес`,
+                accountPayTribute: 'Поддержка через Tribute',
+                accountOperatorLink: 'Настройка запуска →',
                 settingsTitle: '⚙️ Настройка запуска',
                 settingsDesc: 'Панель оператора: backend, монетизация и бот. Обычные пользователи в продакшене этого экрана не видят.',
                 backendUrlLabel: 'URL backend для анализа',
@@ -4459,6 +4569,7 @@
             billingMode: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.billingMode) || 'both') : 'stars',
             starsInvoiceUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.starsInvoiceUrl) || '') : '',
             starsPrice: Number(safeStorage.getItem(STORAGE_KEYS.starsPrice) || String(PREMIUM_STARS_MONTHLY)),
+            premiumRubMonthly: PREMIUM_RUB_MONTHLY,
             tributeUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.tributeUrl) || '') : '',
             cardCheckoutUrl: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.cardCheckoutUrl) || '') : '',
             botUsername: isLocalDevHost() ? (safeStorage.getItem(STORAGE_KEYS.botUsername) || '') : '',
@@ -6320,12 +6431,72 @@
         }
 
         function syncOperatorChrome() {
-            const show = Boolean(state.isOperator);
-            document.body.classList.toggle('operator-mode', show);
-            if (settingsBtn) {
-                settingsBtn.classList.toggle('hidden', !show);
-                settingsBtn.hidden = !show;
+            document.body.classList.toggle('operator-mode', Boolean(state.isOperator));
+            syncAccountModal();
+        }
+
+        function syncAccountModal() {
+            const rub = state.premiumRubMonthly || PREMIUM_RUB_MONTHLY;
+            const stars = state.starsPrice || PREMIUM_STARS_MONTHLY;
+            if (accountStatusEl) {
+                if (state.accessUnlocked) {
+                    const until = formatPremiumExpiryDate(state.accessExpiresAt);
+                    accountStatusEl.textContent = until ? t('quotaHintUntil', until) : t('quotaHintUnlimited');
+                    accountStatusEl.className = 'account-status account-status--premium';
+                } else if (state.freeLimit > 0) {
+                    const left = Math.max(0, state.freeLimit - state.usageCount);
+                    accountStatusEl.textContent = t('accountStatusFree', left, state.freeLimit);
+                    accountStatusEl.className = 'account-status account-status--free';
+                } else {
+                    accountStatusEl.textContent = t('accountStatusNoFree');
+                    accountStatusEl.className = 'account-status account-status--free';
+                }
             }
+            if (accountPricingEl) {
+                accountPricingEl.textContent = t('accountPricingLine', stars, rub);
+            }
+            const showStars = (state.billingMode === 'stars' || state.billingMode === 'both') && !state.accessUnlocked;
+            const showTribute = (state.billingMode === 'tribute' || state.billingMode === 'both')
+                && Boolean(state.tributeUrl) && !state.accessUnlocked;
+            const showCard = state.billingMode === 'both' && Boolean(state.cardCheckoutUrl) && !state.accessUnlocked;
+            if (accountStarsBtn) {
+                accountStarsBtn.classList.toggle('hidden', !showStars);
+                accountStarsBtn.disabled = !isStarsCheckoutReady();
+                accountStarsBtn.textContent = t('accountSubscribeStars', stars);
+            }
+            if (accountCardBtn) {
+                accountCardBtn.classList.toggle('hidden', !showCard);
+                accountCardBtn.textContent = t('accountPayCard', rub);
+            }
+            if (accountTributeBtn) {
+                accountTributeBtn.classList.toggle('hidden', !showTribute);
+            }
+            if (accountTrustEl) {
+                const hideTrust = state.accessUnlocked || (!showStars && !showCard && !showTribute);
+                accountTrustEl.classList.toggle('hidden', hideTrust);
+            }
+            const payActions = document.getElementById('account-pay-actions');
+            if (payActions) {
+                payActions.classList.toggle('hidden', Boolean(state.accessUnlocked));
+            }
+            if (accountOperatorLink) {
+                accountOperatorLink.classList.toggle('hidden', !state.isOperator);
+            }
+            if (settingsBtn) {
+                settingsBtn.setAttribute('aria-label', t('accountBtnAria'));
+            }
+        }
+
+        function closeAccountModal() {
+            if (accountModal) accountModal.classList.remove('active');
+        }
+
+        async function openAccount() {
+            if (state.backendUrl && state.clientId) {
+                try { await syncServerStatus(); } catch { /* ignore */ }
+            }
+            syncAccountModal();
+            if (accountModal) accountModal.classList.add('active');
         }
 
         function applyServerAppConfig(app) {
@@ -6334,6 +6505,7 @@
             if (typeof app.freeLimit === 'number') state.freeLimit = app.freeLimit;
             if (app.billingMode) state.billingMode = app.billingMode;
             if (typeof app.starsPrice === 'number') state.starsPrice = app.starsPrice;
+            if (typeof app.premiumRubMonthly === 'number') state.premiumRubMonthly = app.premiumRubMonthly;
             if (typeof app.tributeUrl === 'string') state.tributeUrl = app.tributeUrl;
             if (typeof app.cardCheckoutUrl === 'string') state.cardCheckoutUrl = app.cardCheckoutUrl;
             if (!canUseLocalConfigOverrides()) {
@@ -6356,6 +6528,7 @@
             if (cardInput) cardInput.value = state.cardCheckoutUrl;
             setBillingMode(state.billingMode);
             syncPaymentButtons();
+            syncAccountModal();
             updateQuotaLabel();
             refreshMonetizationHints();
         }
@@ -6843,6 +7016,7 @@
             if (resultsUnlockCta) {
                 resultsUnlockCta.disabled = !starsReady;
             }
+            syncAccountModal();
             if (copyBotLinkBtn) {
                 copyBotLinkBtn.disabled = !getBotShareLink();
                 copyBotLinkBtn.title = getBotShareLink() ? '' : t('launchBotMissing');
@@ -7067,6 +7241,7 @@
                 }
                 applyPremiumSyncFromServer(data);
                 updateQuotaLabel();
+                syncAccountModal();
                 syncResultsPremiumState();
             } catch {
                 // Silent fallback for local/offline runs.
@@ -7138,6 +7313,7 @@
                     updateQuotaLabel();
                     syncPaymentButtons();
                     closeStarsPaywallModal();
+                    closeAccountModal();
                     syncResultsPremiumState();
                     if (tg?.showAlert) {
                         tg.showAlert(method === 'stars' ? t('paidWithStars') : (state.lang === 'ru'
@@ -8352,7 +8528,43 @@
             languageButtons.forEach(button => button.addEventListener('click', () => {
                 applyLanguage(button.dataset.lang).catch(err => console.error(err));
             }));
-            settingsBtn.addEventListener('click', openSettings);
+            settingsBtn.addEventListener('click', () => openAccount().catch(err => console.error(err)));
+            if (closeAccountBtn) closeAccountBtn.addEventListener('click', closeAccountModal);
+            if (accountModal) {
+                accountModal.addEventListener('click', event => {
+                    if (event.target === accountModal) closeAccountModal();
+                });
+            }
+            if (accountStarsBtn) {
+                accountStarsBtn.addEventListener('click', () => {
+                    lastPaywallReason = 'account_settings';
+                    lastPaywallSourceScreen = 'account';
+                    closeAccountModal();
+                    openStarsCheckout().catch(err => console.error(err));
+                });
+            }
+            if (accountCardBtn) {
+                accountCardBtn.addEventListener('click', () => {
+                    lastPaywallReason = 'account_settings';
+                    lastPaywallSourceScreen = 'account';
+                    closeAccountModal();
+                    openCardCheckout();
+                });
+            }
+            if (accountTributeBtn) {
+                accountTributeBtn.addEventListener('click', () => {
+                    lastPaywallReason = 'account_settings';
+                    lastPaywallSourceScreen = 'account';
+                    closeAccountModal();
+                    openTributeCheckout();
+                });
+            }
+            if (accountOperatorLink) {
+                accountOperatorLink.addEventListener('click', () => {
+                    closeAccountModal();
+                    openSettings();
+                });
+            }
             closeSettingsBtn.addEventListener('click', closeSettings);
             billingModeButtons.forEach(button => button.addEventListener('click', () => setBillingMode(button.dataset.billing)));
             saveBackendBtn.addEventListener('click', () => {
@@ -8615,6 +8827,7 @@
 
         applyDemoPrefillIfNeeded();
         syncOperatorChrome();
+        syncAccountModal();
         syncPlgChrome();
         if (!canAnalyze()) {
             if (state.isOperator) openSettings();
